@@ -15,7 +15,12 @@ const timeRanges: TimeRange[] = [
   { label: "90D", days: 90 },
 ];
 
-export default function TimeRangePicker() {
+interface TimeRangePickerProps {
+  value?: { from: string; to: string };
+  onChange?: (range: { from: string; to: string }) => void;
+}
+
+export default function TimeRangePicker({ value, onChange }: TimeRangePickerProps) {
   const [selected, setSelected] = useState(60);
 
   return (
