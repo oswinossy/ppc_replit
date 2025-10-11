@@ -1,0 +1,171 @@
+Data shaping (Supabase views)
+View: vw_search_terms_daily
+
+Use sales7d for ACOS and conversions.
+
+create or replace view vw_search_terms_daily as
+select
+  date(createdAt)                  as dt,
+  country,
+  campaignId::text                 as campaign_id,
+  campaignName                     as campaign_name,
+  adGroupId::text                  as ad_group_id,
+  adGroupName                      as ad_group_name,
+  coalesce(searchTerm, targeting)  as search_term,
+  matchType,
+  clicks::numeric,
+  spend::numeric                   as cost,
+  sales7d::numeric                 as sales,
+  nullif(keywordBid,0)::numeric    as current_bid
+from sp_search_terms_daily_from22-09-2025;
+
+View: vw_placements_daily
+
+(Assume columns exist for date, country, campaign/ad group, placement, clicks, cost, sales.)
+
+create or replace view vw_placements_daily as
+select
+  date(dt)               as dt,           -- adjust if your date col is named differently
+  country,
+  campaign_id::text      as campaign_id,
+  ad_group_id::text      as ad_group_id,
+  placement,                             -- 'TOS'|'ROS'|'PP'
+  clicks::numeric,
+  cost::numeric,
+  sales::numeric
+from sp_placement_daily_v2;
+
+
+Currency: Never convert—display in each marketplace’s native currency from the reports.
+
+Calculations
+
+ACOS = cost / nullif(sales,0)
+
+CPC = cost / nullif(clicks,0)
+
+CVR = orders / nullif(clicks,0) (if orders present)
+
+ROAS = sales / nullif(cost,0)
+
+Recommendation engine (rules)
+
+Target ACOS = 0.20 per search term (default; UI override allowed).
+
+Eligibility / confidence:
+
+Clicks thresholds: 30 / 100 / 300 / 1000 (OK/Good/High/Extreme).
+
+Suppress bid recs if clicks < 30 (still show in table, but no rec).
+
+Negatives: never suggest under 20 clicks.
+
+Bid formula (per term):
+
+current_acos = cost / max(sales, ε)
+target_acos  = 0.20
+base_bid     = coalesce(current_bid, observed_cpc, ad_group_median_cpc)
+new_bid      = base_bid * (target_acos / current_acos)
+
+
+Safeguards:
+
+Clamp new_bid to [0.20×base_bid, 1.50×base_bid] (configurable).
+
+If sales = 0 and clicks ≥ 30 → tiered down-bids (−15% to −30%) by spend vs ad-group median CPC.
+
+If ACOS ≤ 0.8 × target and clicks ≥ 30 → tiered up-bids (+10% to +20%).
+
+Placement nudges (optional):
+
+If placement ACOS differs from overall by >20% and has meaningful impressions, suggest ±5–10 p.p. placement adjustments (guard by low spend).
+
+Negatives:
+
+Suggest Negative Exact when clicks ≥ 20 and sales = 0.
+
+Suggest Negative Phrase for clusters of related zero-sale terms (basic token grouping).
+
+Provide rationale and include in negatives.xlsx export.
+
+Persistence:
+
+create table if not exists recommendations (
+  id uuid primary key default gen_random_uuid(),
+  scope text not null,            -- 'country'|'campaign'|'ad_group'
+  scope_id text,
+  generated_for daterange,        -- [from, to]
+  target_acos numeric not null default 0.20,
+  items jsonb not null,           -- [{search_term, current_bid, new_bid, clicks, cost, sales, acos, rationale, confidence}]
+  created_at timestamptz default now()
+);
+
+API routes
+
+GET /api/kpis?country=FR&from&to&grain=daily
+
+GET /api/campaigns?country=FR&from&to
+
+GET /api/ad-groups?campaignId=...&from&to
+
+GET /api/search-terms?adGroupId=...&from&to
+
+POST /api/recommendations/run → { scope, id?, from, to, targetAcos=0.20 }
+
+GET /api/recommendations?scope=ad_group&id=...
+
+GET /api/exports/negatives.xlsx?country=...&from=...&to=...
+
+UI pages
+
+/login
+
+/dashboard – country KPIs + ACOS vs sales chart
+
+/country/[code] – campaigns table + chart
+
+/campaign/[id] – ad groups table + chart
+
+/ad-group/[id] – Search Terms (table + Generate recs), Placements
+
+/reports – YoY/QoQ, Outliers
+
+Global Export → negatives.xlsx
+
+Freshness
+
+Data loads daily at 00:00.
+
+Add a simple cron (or manual button) to recompute recommendations at 00:30.
+
+Acceptance criteria
+
+KPIs reconcile with Supabase rollups for the selected window.
+
+Drilldown totals stay consistent across levels.
+
+Recommendation math is clamped and reproducible.
+
+No negative suggestions under 20 clicks.
+
+Exports open cleanly in Excel.
+
+All figures shown in each marketplace’s local currency.
+
+Product groups (future-ready)
+
+You don’t have groups yet. Ship MVP without them, but include optional tables for later:
+
+create table if not exists product_groups (
+  id uuid primary key default gen_random_uuid(),
+  name text not null
+);
+
+create table if not exists ad_group_product_groups (
+  ad_group_id text not null,
+  product_group_id uuid not null,
+  primary key (ad_group_id, product_group_id)
+);
+
+
+When mappings exist, enable product-group slices in KPIs and the YoY/QoQ report.

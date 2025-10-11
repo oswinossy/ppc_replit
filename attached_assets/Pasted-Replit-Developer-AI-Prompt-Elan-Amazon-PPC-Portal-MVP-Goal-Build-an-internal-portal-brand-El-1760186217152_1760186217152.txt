@@ -1,0 +1,75 @@
+Replit Developer AI Prompt — Elan Amazon PPC Portal (MVP)
+
+Goal: Build an internal portal (brand: Elan) to visualize Amazon PPC performance and generate per-search-term bid recommendations to target 20% ACOS. Data already lives in Supabase:
+
+sp_search_terms_daily_from22-09-2025 (search-term daily metrics)
+
+sp_placement_daily_v2 (placement daily metrics: TOS/ROS/PP)
+
+Keep it simple (no Amazon API writes). UX similar to M19.
+
+Stack
+
+Next.js 14 (App Router) + TypeScript
+
+TailwindCSS + shadcn/ui (Cards, Tabs, Table, Tooltip)
+
+Recharts (line/area/bar)
+
+Supabase JS (auth + RLS reads)
+
+xlsx (Excel export)
+
+Single repo deployable on Replit (include .replit/replit.nix if needed)
+
+Core flows
+
+Country overview (last 60 days default)
+
+KPI cards (local currency): Ad Sales, ACOS, CPC, Cost, ROAS, Orders.
+
+Line chart: ACOS vs Ad Sales, toggles Daily / Weekly / Monthly.
+
+Country grid → click to drill down.
+
+Drilldown
+
+Country → Campaigns table.
+
+Campaign → Ad Groups table.
+
+Ad Group → Search Terms table: columns = searchTerm, matchType, clicks, cost, sales7d, orders (if available), CPC, CVR, ACOS, current keywordBid (if present).
+
+Placements tab (TOS/ROS/PP) from sp_placement_daily_v2.
+
+Recommendations (per search term)
+
+Button: Generate recommendations (scope: country / campaign / ad group; range selector).
+
+Produces keyword bid suggestions toward 20% ACOS (overridable input).
+
+Table: Scope, Current, Proposed, Δ, Target, Rationale, Confidence, Data window.
+
+Persist each run in recommendations table (schema below).
+
+Negatives & search terms
+
+Identify wasteful terms with clicks ≥ 20 and sales7d = 0 → suggest Negative Exact (or Phrase when clusters detected).
+
+Do not suggest anything under 20 clicks.
+
+Export Excel (.xlsx): columns {country, campaign, adGroup, term, type, clicks, cost, rationale}.
+
+Reports
+
+YoY / QoQ drop report by country and (when available) product group and campaign.
+
+Outliers (spend/ACOS outliers at search-term level).
+
+CSV exports.
+
+Branding & UX
+
+Top-left “Elan”.
+
+Sticky KPI strip, time picker (7/14/30/60/90/custom), saved filters in URL.
