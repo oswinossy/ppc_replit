@@ -17,25 +17,29 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
 
-  const { data: kpis, isLoading: kpisLoading } = useQuery({
+  const { data: kpis, isLoading: kpisLoading, error: kpisError } = useQuery({
     queryKey: ['/api/kpis', dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ from: dateRange.from, to: dateRange.to });
       const response = await fetch(`/api/kpis?${params}`);
-      return response.json();
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      return data;
     },
   });
 
-  const { data: countries, isLoading: countriesLoading } = useQuery({
+  const { data: countries, isLoading: countriesLoading, error: countriesError } = useQuery({
     queryKey: ['/api/countries', dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ from: dateRange.from, to: dateRange.to });
       const response = await fetch(`/api/countries?${params}`);
-      return response.json();
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      return data;
     },
   });
 
-  const { data: chartData, isLoading: chartLoading } = useQuery({
+  const { data: chartData, isLoading: chartLoading, error: chartError } = useQuery({
     queryKey: ['/api/chart-data', dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
@@ -44,7 +48,9 @@ export default function Dashboard() {
         grain: 'weekly'
       });
       const response = await fetch(`/api/chart-data?${params}`);
-      return response.json();
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      return data;
     },
   });
 
@@ -53,7 +59,7 @@ export default function Dashboard() {
     window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
   };
 
-  const kpiCards = (kpis && !kpis.error) ? [
+  const kpiCards = kpis ? [
     { label: "Ad Sales", value: kpis.adSales?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0', currency: kpis.currency === 'EUR' ? '€' : kpis.currency },
     { label: "ACOS", value: `${kpis.acos?.toFixed(1) || '0'}%` },
     { label: "CPC", value: kpis.cpc?.toFixed(2) || '0', currency: kpis.currency === 'EUR' ? '€' : kpis.currency },
@@ -117,7 +123,7 @@ export default function Dashboard() {
 
         {chartLoading ? (
           <Skeleton className="h-80" />
-        ) : chartData ? (
+        ) : chartError ? null : chartData && Array.isArray(chartData) ? (
           <PerformanceChart data={chartData} currency={kpis?.currency === 'EUR' ? '€' : kpis?.currency || '€'} />
         ) : null}
 
@@ -134,7 +140,26 @@ export default function Dashboard() {
           </div>
           {countriesLoading ? (
             <Skeleton className="h-64" />
-          ) : countries ? (
+          ) : countriesError ? (
+            <div className="border rounded-lg p-8 text-center space-y-4" data-testid="error-message">
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">Database Setup Required</h3>
+                <p className="text-sm text-muted-foreground max-w-2xl mx-auto">
+                  Your Supabase table name contains hyphens which require a database view. 
+                  Please create the view in your Supabase SQL Editor:
+                </p>
+              </div>
+              <div className="bg-muted p-4 rounded-md text-left max-w-3xl mx-auto">
+                <code className="text-sm font-mono">
+                  CREATE OR REPLACE VIEW vw_sp_search_terms_daily AS<br />
+                  SELECT * FROM "sp_search_terms_daily_from22-09-2025";
+                </code>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                See <code className="bg-muted px-2 py-1 rounded">supabase-setup.sql</code> for the complete setup script
+              </p>
+            </div>
+          ) : countries && Array.isArray(countries) ? (
             <DataTable
               columns={[
                 { key: "country", label: "Country", sortable: true },
