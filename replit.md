@@ -6,23 +6,23 @@ Internal analytics portal for Amazon PPC campaigns with bid recommendations targ
 ## Tech Stack
 - **Frontend**: React 18, TypeScript, TailwindCSS, shadcn/ui, Recharts, Wouter
 - **Backend**: Express, Drizzle ORM, PostgreSQL (Supabase)
-- **Database**: Supabase PostgreSQL with views `vw_sp_search_terms_daily` and `sp_placement_daily_v2`
+- **Database**: Supabase PostgreSQL with table `s_products_searchterms`
 
 ## Setup Instructions
 
-### 1. Database Setup (Required)
-Your Supabase table has hyphens in the name which causes issues with Drizzle ORM. You need to create a view:
+### 1. Database Setup (Completed ✅)
+Connected to Supabase database successfully using pooler connection.
 
-1. Go to your Supabase dashboard → SQL Editor
-2. Run the SQL from `supabase-setup.sql`:
-```sql
-CREATE OR REPLACE VIEW vw_sp_search_terms_daily AS 
-SELECT * FROM "sp_search_terms_daily_from22-09-2025";
+**Connection String Format:**
+```
+postgresql://postgres.{PROJECT_REF}:{PASSWORD}@aws-1-us-east-1.pooler.supabase.com:6543/postgres
 ```
 
+Note: The pooler hostname is required for Replit network access.
+
 ### 2. Environment Variables
-Required secrets (already configured):
-- `DATABASE_URL` - Supabase connection string
+Required secrets (configured):
+- `DATABASE_URL` - Supabase pooler connection string
 - `SESSION_SECRET` - Session encryption key
 
 ### 3. Running the App
@@ -64,14 +64,29 @@ The app will be available on port 5000.
 
 ## Data Structure
 
-### Main Table (via View)
-`vw_sp_search_terms_daily` columns:
-- Performance: clicks, cost, sales7d, purchases7d
-- Identifiers: campaignId, adGroupId, searchTerm
-- Metadata: country, matchType, keywordBid, currency, dt
+### Main Table
+`s_products_searchterms` (64 columns total):
+
+**Performance Metrics:**
+- Numeric: `impressions`, `clicks` (bigint), `cost`, `costPerClick`, `keywordBid` (double precision)
+- TEXT (requires casting): `sales7d`, `sales14d`, `purchases7d`, `purchases14d`, `acosClicks7d`, `roasClicks7d`
+
+**Identifiers:**
+- `campaignId`, `adGroupId`, `keywordId` (bigint)
+- `searchTerm`, `targeting`, `keyword` (text)
+
+**Metadata:**
+- `country`, `campaignName`, `adGroupName`, `matchType`, `keywordType` (text)
+- `campaignBudgetCurrencyCode` (EUR, GBP, SEK, PLN)
+- `date` (text format: YYYY-MM-DD)
+
+**Important Note:** Sales and purchases columns are stored as TEXT and must be cast to numeric for aggregation:
+```sql
+COALESCE(SUM(NULLIF(sales7d, '')::numeric), 0)
+```
 
 ### Placements Table
-`sp_placement_daily_v2`: TOS, ROS, PP performance
+`sp_placement_daily_v2`: Not present in current database
 
 ## Design Guidelines
 - Professional data-focused aesthetic (Linear + Vercel inspired)
@@ -84,14 +99,18 @@ The app will be available on port 5000.
 - Responsive grid layouts
 
 ## Recent Changes
-- 2025-10-11: Connected to real Supabase data via view workaround
-- 2025-10-11: Implemented full drilldown navigation
-- 2025-10-11: Added bid recommendation engine
+- 2025-10-14: ✅ Successfully connected to Supabase database using pooler
+- 2025-10-14: ✅ Updated schema to match actual table structure (TEXT columns for sales/purchases)
+- 2025-10-14: ✅ Fixed all API routes to handle TEXT to numeric conversions
+- 2025-10-14: ✅ Verified full drilldown flow works with real data (10 countries, multiple campaigns)
+- 2025-10-14: ✅ E2E tests passed - Dashboard → Countries → Campaigns → Ad Groups → Search Terms
+- 2025-10-11: Implemented bid recommendation engine
 - 2025-10-11: Integrated Excel export for negatives
 
-## Known Issues
-- Table name contains hyphens - resolved via database view
+## Known Issues & Limitations
+- Placements endpoint returns 500 (table `sp_placement_daily_v2` not in database)
 - Date range picker currently shows static "Last 60 days"
+- Timezone normalization assumes UTC (monitor for drift if deploying outside UTC)
 
 ## User Preferences
 - Prefer data-first over decorative UI
