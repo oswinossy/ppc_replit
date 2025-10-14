@@ -276,25 +276,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (from) conditions.push(gte(searchTermsDaily.date, from as string));
       if (to) conditions.push(lte(searchTermsDaily.date, to as string));
 
-      let dateGroup;
+      let dateGroupSelect;
+      let dateGroupBy;
+      let dateOrderBy;
+      
       if (grain === 'weekly') {
-        dateGroup = sql<string>`DATE_TRUNC('week', ${searchTermsDaily.date}::date)`;
+        dateGroupSelect = sql<string>`DATE_TRUNC('week', ${searchTermsDaily.date}::date)`;
+        dateGroupBy = sql`DATE_TRUNC('week', ${searchTermsDaily.date}::date)`;
+        dateOrderBy = sql`DATE_TRUNC('week', ${searchTermsDaily.date}::date)`;
       } else if (grain === 'monthly') {
-        dateGroup = sql<string>`DATE_TRUNC('month', ${searchTermsDaily.date}::date)`;
+        dateGroupSelect = sql<string>`DATE_TRUNC('month', ${searchTermsDaily.date}::date)`;
+        dateGroupBy = sql`DATE_TRUNC('month', ${searchTermsDaily.date}::date)`;
+        dateOrderBy = sql`DATE_TRUNC('month', ${searchTermsDaily.date}::date)`;
       } else {
-        dateGroup = searchTermsDaily.date;
+        dateGroupSelect = searchTermsDaily.date;
+        dateGroupBy = searchTermsDaily.date;
+        dateOrderBy = searchTermsDaily.date;
       }
 
       const results = await db
         .select({
-          date: dateGroup,
+          date: dateGroupSelect,
           cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
         })
         .from(searchTermsDaily)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(dateGroup)
-        .orderBy(asc(dateGroup));
+        .groupBy(dateGroupBy)
+        .orderBy(asc(dateOrderBy));
 
       const chartData = results.map(row => ({
         date: new Date(row.date as string).toISOString().split('T')[0],
