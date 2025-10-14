@@ -227,33 +227,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Placements by ad group endpoint
+  // Placements by campaign endpoint
   app.get("/api/placements", async (req, res) => {
     try {
-      const { adGroupId, from, to } = req.query;
+      const { campaignId, country, from, to } = req.query;
       
       const conditions = [];
-      if (adGroupId) conditions.push(eq(placementsDaily.adGroupId, adGroupId as string));
-      if (from) conditions.push(gte(placementsDaily.dt, from as string));
-      if (to) conditions.push(lte(placementsDaily.dt, to as string));
+      if (campaignId) conditions.push(sql`${placementsDaily.campaignId}::text = ${campaignId}`);
+      if (country) conditions.push(eq(placementsDaily.country, country as string));
+      if (from) conditions.push(gte(placementsDaily.date, from as string));
+      if (to) conditions.push(lte(placementsDaily.date, to as string));
 
       const results = await db
         .select({
-          placement: placementsDaily.placement,
-          clicks: sql<number>`COALESCE(SUM(${placementsDaily.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${placementsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${placementsDaily.sales}), 0)`,
+          placement: placementsDaily.campaignPlacement,
+          clicks: sql<number>`COALESCE(SUM(NULLIF(${placementsDaily.clicks}, '')::numeric), 0)`,
+          cost: sql<number>`COALESCE(SUM(NULLIF(${placementsDaily.cost}, '')::numeric), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${placementsDaily.sales7d}, '')::numeric), 0)`,
+          purchases: sql<number>`COALESCE(SUM(NULLIF(${placementsDaily.purchases7d}, '')::numeric), 0)`,
         })
         .from(placementsDaily)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(placementsDaily.placement)
-        .orderBy(desc(sql`SUM(${placementsDaily.sales})`));
+        .groupBy(placementsDaily.campaignPlacement)
+        .orderBy(desc(sql`COALESCE(SUM(NULLIF(${placementsDaily.sales7d}, '')::numeric), 0)`));
 
       const placements = results.map(row => ({
-        placement: row.placement,
+        placement: row.placement || 'UNKNOWN',
         clicks: Number(row.clicks),
         cost: Number(row.cost),
         sales: Number(row.sales),
+        orders: Number(row.purchases),
         acos: calculateACOS(Number(row.cost), Number(row.sales)),
       }));
 
