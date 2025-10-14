@@ -16,18 +16,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const conditions = [];
       if (country) conditions.push(eq(searchTermsDaily.country, country as string));
-      if (campaignId) conditions.push(eq(searchTermsDaily.campaignId, campaignId as string));
-      if (adGroupId) conditions.push(eq(searchTermsDaily.adGroupId, adGroupId as string));
-      if (from) conditions.push(gte(searchTermsDaily.dt, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.dt, to as string));
+      if (campaignId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${campaignId}`);
+      if (adGroupId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${adGroupId}`);
+      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
+      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
 
       const result = await db
         .select({
           totalClicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
           totalCost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          totalSales: sql<number>`COALESCE(SUM(${searchTermsDaily.sales7d}), 0)`,
-          totalOrders: sql<number>`COALESCE(SUM(${searchTermsDaily.purchases7d}), 0)`,
-          currency: sql<string>`MAX(${searchTermsDaily.currency})`,
+          totalSales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
+          totalOrders: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.purchases7d}, '')::numeric), 0)`,
+          currency: sql<string>`MAX(${searchTermsDaily.campaignBudgetCurrencyCode})`,
         })
         .from(searchTermsDaily)
         .where(conditions.length > 0 ? and(...conditions) : undefined);
@@ -59,22 +59,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { from, to } = req.query;
       
       const conditions = [];
-      if (from) conditions.push(gte(searchTermsDaily.dt, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.dt, to as string));
+      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
+      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
 
       const results = await db
         .select({
           country: searchTermsDaily.country,
           clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${searchTermsDaily.sales7d}), 0)`,
-          orders: sql<number>`COALESCE(SUM(${searchTermsDaily.purchases7d}), 0)`,
-          currency: sql<string>`MAX(${searchTermsDaily.currency})`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.purchases7d}, '')::numeric), 0)`,
+          currency: sql<string>`MAX(${searchTermsDaily.campaignBudgetCurrencyCode})`,
         })
         .from(searchTermsDaily)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .groupBy(searchTermsDaily.country)
-        .orderBy(desc(sql`SUM(${searchTermsDaily.sales7d})`));
+        .orderBy(desc(sql`SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric)`));
 
       const countries = results.map(row => ({
         country: row.country,
@@ -101,8 +101,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const conditions = [];
       if (country) conditions.push(eq(searchTermsDaily.country, country as string));
-      if (from) conditions.push(gte(searchTermsDaily.dt, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.dt, to as string));
+      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
+      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
 
       const results = await db
         .select({
@@ -110,14 +110,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           campaignName: sql<string>`MAX(${searchTermsDaily.campaignName})`,
           clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${searchTermsDaily.sales7d}), 0)`,
-          orders: sql<number>`COALESCE(SUM(${searchTermsDaily.purchases7d}), 0)`,
-          currency: sql<string>`MAX(${searchTermsDaily.currency})`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.purchases7d}, '')::numeric), 0)`,
+          currency: sql<string>`MAX(${searchTermsDaily.campaignBudgetCurrencyCode})`,
         })
         .from(searchTermsDaily)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .groupBy(searchTermsDaily.campaignId)
-        .orderBy(desc(sql`SUM(${searchTermsDaily.sales7d})`));
+        .orderBy(desc(sql`SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric)`));
 
       const campaigns = results.map(row => ({
         id: row.campaignId,
@@ -143,9 +143,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { campaignId, from, to } = req.query;
       
       const conditions = [];
-      if (campaignId) conditions.push(eq(searchTermsDaily.campaignId, campaignId as string));
-      if (from) conditions.push(gte(searchTermsDaily.dt, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.dt, to as string));
+      if (campaignId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${campaignId}`);
+      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
+      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
 
       const results = await db
         .select({
@@ -153,14 +153,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           adGroupName: sql<string>`MAX(${searchTermsDaily.adGroupName})`,
           clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${searchTermsDaily.sales7d}), 0)`,
-          orders: sql<number>`COALESCE(SUM(${searchTermsDaily.purchases7d}), 0)`,
-          currency: sql<string>`MAX(${searchTermsDaily.currency})`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.purchases7d}, '')::numeric), 0)`,
+          currency: sql<string>`MAX(${searchTermsDaily.campaignBudgetCurrencyCode})`,
         })
         .from(searchTermsDaily)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .groupBy(searchTermsDaily.adGroupId)
-        .orderBy(desc(sql`SUM(${searchTermsDaily.sales7d})`));
+        .orderBy(desc(sql`SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric)`));
 
       const adGroups = results.map(row => ({
         id: row.adGroupId,
@@ -186,9 +186,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { adGroupId, from, to } = req.query;
       
       const conditions = [];
-      if (adGroupId) conditions.push(eq(searchTermsDaily.adGroupId, adGroupId as string));
-      if (from) conditions.push(gte(searchTermsDaily.dt, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.dt, to as string));
+      if (adGroupId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${adGroupId}`);
+      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
+      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
 
       const results = await db
         .select({
@@ -196,15 +196,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           matchType: sql<string>`MAX(${searchTermsDaily.matchType})`,
           clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${searchTermsDaily.sales7d}), 0)`,
-          orders: sql<number>`COALESCE(SUM(${searchTermsDaily.purchases7d}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.purchases7d}, '')::numeric), 0)`,
           currentBid: sql<number>`MAX(${searchTermsDaily.keywordBid})`,
-          currency: sql<string>`MAX(${searchTermsDaily.currency})`,
+          currency: sql<string>`MAX(${searchTermsDaily.campaignBudgetCurrencyCode})`,
         })
         .from(searchTermsDaily)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .groupBy(sql`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`)
-        .orderBy(desc(sql`SUM(${searchTermsDaily.sales7d})`));
+        .orderBy(desc(sql`SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric)`));
 
       const searchTerms = results.map(row => ({
         searchTerm: row.searchTerm,
@@ -271,25 +271,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const conditions = [];
       if (country) conditions.push(eq(searchTermsDaily.country, country as string));
-      if (campaignId) conditions.push(eq(searchTermsDaily.campaignId, campaignId as string));
-      if (adGroupId) conditions.push(eq(searchTermsDaily.adGroupId, adGroupId as string));
-      if (from) conditions.push(gte(searchTermsDaily.dt, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.dt, to as string));
+      if (campaignId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${campaignId}`);
+      if (adGroupId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${adGroupId}`);
+      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
+      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
 
       let dateGroup;
       if (grain === 'weekly') {
-        dateGroup = sql<string>`DATE_TRUNC('week', ${searchTermsDaily.dt})`;
+        dateGroup = sql<string>`DATE_TRUNC('week', ${searchTermsDaily.date}::date)`;
       } else if (grain === 'monthly') {
-        dateGroup = sql<string>`DATE_TRUNC('month', ${searchTermsDaily.dt})`;
+        dateGroup = sql<string>`DATE_TRUNC('month', ${searchTermsDaily.date}::date)`;
       } else {
-        dateGroup = searchTermsDaily.dt;
+        dateGroup = searchTermsDaily.date;
       }
 
       const results = await db
         .select({
           date: dateGroup,
           cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${searchTermsDaily.sales7d}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
         })
         .from(searchTermsDaily)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -316,10 +316,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const conditions = [];
       if (scope === 'country' && scopeId) conditions.push(eq(searchTermsDaily.country, scopeId));
-      if (scope === 'campaign' && scopeId) conditions.push(eq(searchTermsDaily.campaignId, scopeId));
-      if (scope === 'ad_group' && scopeId) conditions.push(eq(searchTermsDaily.adGroupId, scopeId));
-      if (from) conditions.push(gte(searchTermsDaily.dt, from));
-      if (to) conditions.push(lte(searchTermsDaily.dt, to));
+      if (scope === 'campaign' && scopeId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${scopeId}`);
+      if (scope === 'ad_group' && scopeId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${scopeId}`);
+      if (from) conditions.push(gte(searchTermsDaily.date, from));
+      if (to) conditions.push(lte(searchTermsDaily.date, to));
 
       // Get search terms data
       const results = await db
@@ -327,7 +327,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           searchTerm: sql<string>`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`,
           clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${searchTermsDaily.sales7d}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
           currentBid: sql<number>`MAX(${searchTermsDaily.keywordBid})`,
         })
         .from(searchTermsDaily)
@@ -380,17 +380,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const conditions = [];
       if (country) conditions.push(eq(searchTermsDaily.country, country as string));
-      if (campaignId) conditions.push(eq(searchTermsDaily.campaignId, campaignId as string));
-      if (adGroupId) conditions.push(eq(searchTermsDaily.adGroupId, adGroupId as string));
-      if (from) conditions.push(gte(searchTermsDaily.dt, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.dt, to as string));
+      if (campaignId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${campaignId}`);
+      if (adGroupId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${adGroupId}`);
+      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
+      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
 
       const results = await db
         .select({
           searchTerm: sql<string>`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`,
           clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${searchTermsDaily.sales7d}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
           country: sql<string>`MAX(${searchTermsDaily.country})`,
           campaignName: sql<string>`MAX(${searchTermsDaily.campaignName})`,
           adGroupName: sql<string>`MAX(${searchTermsDaily.adGroupName})`,
@@ -438,17 +438,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const conditions = [];
       if (country) conditions.push(eq(searchTermsDaily.country, country as string));
-      if (campaignId) conditions.push(eq(searchTermsDaily.campaignId, campaignId as string));
-      if (adGroupId) conditions.push(eq(searchTermsDaily.adGroupId, adGroupId as string));
-      if (from) conditions.push(gte(searchTermsDaily.dt, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.dt, to as string));
+      if (campaignId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${campaignId}`);
+      if (adGroupId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${adGroupId}`);
+      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
+      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
 
       const results = await db
         .select({
           searchTerm: sql<string>`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`,
           clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${searchTermsDaily.sales7d}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
           country: sql<string>`MAX(${searchTermsDaily.country})`,
           campaignName: sql<string>`MAX(${searchTermsDaily.campaignName})`,
           adGroupName: sql<string>`MAX(${searchTermsDaily.adGroupName})`,
