@@ -6,7 +6,7 @@ Internal analytics portal for Amazon PPC campaigns with bid recommendations targ
 ## Tech Stack
 - **Frontend**: React 18, TypeScript, TailwindCSS, shadcn/ui, Recharts, Wouter
 - **Backend**: Express, Drizzle ORM, PostgreSQL (Supabase)
-- **Database**: Supabase PostgreSQL with table `s_products_searchterms`
+- **Database**: Supabase PostgreSQL with tables `s_products_searchterms` and `sp_placement_daily_v2`
 
 ## Setup Instructions
 
@@ -36,6 +36,7 @@ The app will be available on port 5000.
 
 ### Core Features
 - **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Search Terms
+- **Placement Analysis**: Campaign-level placement performance (TOS, ROS, PP, UNKNOWN)
 - **KPI Tracking**: Sales, ACOS, CPC, Cost, ROAS, Orders
 - **Performance Charts**: Weekly aggregated ACOS and sales trends
 - **Bid Recommendations**: 20% ACOS targeting with confidence levels
@@ -86,7 +87,24 @@ COALESCE(SUM(NULLIF(sales7d, '')::numeric), 0)
 ```
 
 ### Placements Table
-`sp_placement_daily_v2`: Not present in current database
+`sp_placement_daily_v2` (47 columns, 30,231 rows):
+
+**Performance Metrics (all TEXT - require casting):**
+- `impressions`, `clicks`, `cost`, `spend`, `costPerClick`, `clickThroughRate`
+- Sales: `sales1d`, `sales7d`, `sales14d`, `sales30d`
+- Purchases: `purchases1d`, `purchases7d`, `purchases14d`, `purchases30d`
+- Units sold: `unitsSoldClicks1d/7d/14d/30d`
+- ACOS/ROAS: `acosClicks14d`, `roasClicks14d`
+
+**Identifiers:**
+- `campaignId` (bigint), `campaignName` (text)
+- `campaignPlacement` (text) - TOS/ROS/PP/UNKNOWN
+- `country` (text), `date` (text)
+
+**Important Note:** All metrics are TEXT and must be cast using:
+```sql
+COALESCE(SUM(NULLIF(column, '')::numeric), 0)
+```
 
 ## Design Guidelines
 - Professional data-focused aesthetic (Linear + Vercel inspired)
@@ -99,18 +117,20 @@ COALESCE(SUM(NULLIF(sales7d, '')::numeric), 0)
 - Responsive grid layouts
 
 ## Recent Changes
+- 2025-10-14: ✅ Integrated sp_placement_daily_v2 table (30k+ rows)
+- 2025-10-14: ✅ Updated placements endpoint with TEXT column casting
+- 2025-10-14: ✅ E2E tests passed - Placements tab working with real data
 - 2025-10-14: ✅ Successfully connected to Supabase database using pooler
 - 2025-10-14: ✅ Updated schema to match actual table structure (TEXT columns for sales/purchases)
 - 2025-10-14: ✅ Fixed all API routes to handle TEXT to numeric conversions
-- 2025-10-14: ✅ Verified full drilldown flow works with real data (10 countries, multiple campaigns)
-- 2025-10-14: ✅ E2E tests passed - Dashboard → Countries → Campaigns → Ad Groups → Search Terms
+- 2025-10-14: ✅ Verified full drilldown flow works with real data (10 countries, €95k sales)
 - 2025-10-11: Implemented bid recommendation engine
 - 2025-10-11: Integrated Excel export for negatives
 
 ## Known Issues & Limitations
-- Placements endpoint returns 500 (table `sp_placement_daily_v2` not in database)
 - Date range picker currently shows static "Last 60 days"
 - Timezone normalization assumes UTC (monitor for drift if deploying outside UTC)
+- Some placement rows show "UNKNOWN" type (actual placement type may need mapping)
 
 ## User Preferences
 - Prefer data-first over decorative UI
