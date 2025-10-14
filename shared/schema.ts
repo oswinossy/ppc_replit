@@ -97,15 +97,69 @@ export const searchTermsDaily = pgTable('s_products_searchterms', {
 
 export const placementsDaily = pgTable("sp_placement_daily_v2", {
   id: bigint("id", { mode: "number" }).primaryKey(),
-  dt: text("dt"),
+  date: text("date"),
+  retailer: text("retailer"),
+  campaignPlacement: text("campaignPlacement"),
+  
+  // All metrics are TEXT - require casting for aggregation
+  impressions: text("impressions"),
+  clicks: text("clicks"),
+  cost: text("cost"),
+  spend: text("spend"),
+  costPerClick: text("costPerClick"),
+  clickThroughRate: text("clickThroughRate"),
+  
+  // Purchase metrics (TEXT)
+  purchases1d: text("purchases1d"),
+  purchases7d: text("purchases7d"),
+  purchases14d: text("purchases14d"),
+  purchases30d: text("purchases30d"),
+  purchasesSameSku1d: text("purchasesSameSku1d"),
+  purchasesSameSku7d: text("purchasesSameSku7d"),
+  purchasesSameSku14d: text("purchasesSameSku14d"),
+  purchasesSameSku30d: text("purchasesSameSku30d"),
+  
+  // Units sold (TEXT)
+  unitsSoldClicks1d: text("unitsSoldClicks1d"),
+  unitsSoldClicks7d: text("unitsSoldClicks7d"),
+  unitsSoldClicks14d: text("unitsSoldClicks14d"),
+  unitsSoldClicks30d: text("unitsSoldClicks30d"),
+  
+  // Sales metrics (TEXT)
+  sales1d: text("sales1d"),
+  sales7d: text("sales7d"),
+  sales14d: text("sales14d"),
+  sales30d: text("sales30d"),
+  attributedSalesSameSku1d: text("attributedSalesSameSku1d"),
+  attributedSalesSameSku7d: text("attributedSalesSameSku7d"),
+  attributedSalesSameSku14d: text("attributedSalesSameSku14d"),
+  attributedSalesSameSku30d: text("attributedSalesSameSku30d"),
+  
+  // Same SKU units (TEXT)
+  unitsSoldSameSku1d: text("unitsSoldSameSku1d"),
+  unitsSoldSameSku7d: text("unitsSoldSameSku7d"),
+  unitsSoldSameSku14d: text("unitsSoldSameSku14d"),
+  unitsSoldSameSku30d: text("unitsSoldSameSku30d"),
+  
+  // Kindle metrics (TEXT)
+  kindleEditionNormalizedPagesRead14d: text("kindleEditionNormalizedPagesRead14d"),
+  kindleEditionNormalizedPagesRoyalties14d: text("kindleEditionNormalizedPagesRoyalties14d"),
+  qualifiedBorrows: text("qualifiedBorrows"),
+  royaltyQualifiedBorrows: text("royaltyQualifiedBorrows"),
+  
+  // Additional metrics (TEXT)
+  addToList: text("addToList"),
+  campaignBiddingStrategy: text("campaignBiddingStrategy"),
+  acosClicks14d: text("acosClicks14d"),
+  roasClicks14d: text("roasClicks14d"),
+  
+  // Metadata
+  created_at: timestamp("created_at"),
+  updated_at: timestamp("updated_at"),
   country: text("country"),
-  campaignId: text("campaignId"),
-  adGroupId: text("adGroupId"),
-  placement: text("placement"),
-  clicks: bigint("clicks", { mode: "number" }),
-  cost: numeric("cost"),
-  sales: numeric("sales"),
-  impressions: bigint("impressions", { mode: "number" }),
+  campaignId: bigint("campaignId", { mode: "number" }),
+  campaignName: text("campaignName"),
+  upload_id: text("upload_id"),
 });
 
 export const recommendations = pgTable("recommendations", {
