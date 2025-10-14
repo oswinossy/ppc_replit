@@ -3,7 +3,7 @@ import { pgTable, text, varchar, numeric, timestamp, date, integer, uuid } from 
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const searchTermsDaily = pgTable('vw_sp_search_terms_daily', {
+export const searchTermsDaily = pgTable('s_products_searchterms', {
   id: integer("id").primaryKey(),
   impressions: integer("impressions"),
   clicks: integer("clicks"),
