@@ -29,14 +29,20 @@ const currencyToFrankfurterCode: CurrencyMap = {
 /**
  * Fetch exchange rates for a specific date
  * Returns rates with EUR as base currency
+ * For future dates, uses latest available rates
  */
 export async function getExchangeRatesForDate(date: string): Promise<Record<string, number>> {
   try {
-    // Frankfurter API uses EUR as base by default
-    const response = await fetch(`https://api.frankfurter.dev/${date}`);
+    // Check if date is in the future - use 'latest' endpoint
+    const targetDate = new Date(date);
+    const today = new Date();
+    const useLatest = targetDate > today;
+    
+    const endpoint = useLatest ? 'latest' : date;
+    const response = await fetch(`https://api.frankfurter.dev/${endpoint}`);
     
     if (!response.ok) {
-      console.error(`Failed to fetch exchange rates for ${date}`);
+      // Silently use default rates for failed requests
       return getDefaultRates();
     }
     
@@ -54,7 +60,7 @@ export async function getExchangeRatesForDate(date: string): Promise<Record<stri
     
     return toEurRates;
   } catch (error) {
-    console.error('Error fetching exchange rates:', error);
+    // Silently use default rates for errors
     return getDefaultRates();
   }
 }
