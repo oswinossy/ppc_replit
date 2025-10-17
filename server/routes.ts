@@ -10,7 +10,7 @@ import * as XLSX from 'xlsx';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
-  // KPI aggregation endpoint - combines brand + product data
+  // KPI aggregation endpoint - combines brand + product data with EUR conversion
   app.get("/api/kpis", async (req, res) => {
     try {
       const { country, campaignId, adGroupId, from, to } = req.query;
@@ -31,50 +31,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (from) productConditions.push(gte(productSearchTerms.date, from as string));
       if (to) productConditions.push(lte(productSearchTerms.date, to as string));
 
-      // Query brand data (clean numeric columns)
-      const brandResult = await db
+      // Query brand data grouped by date and currency for EUR conversion
+      const brandResults = await db
         .select({
+          date: brandSearchTerms.date,
+          currency: brandSearchTerms.campaignBudgetCurrencyCode,
           clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
           orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
-          currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
         })
         .from(brandSearchTerms)
-        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined);
+        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
+        .groupBy(brandSearchTerms.date, brandSearchTerms.campaignBudgetCurrencyCode);
 
-      // Query product data (TEXT columns need casting)
-      const productResult = await db
+      // Query product data grouped by date and currency for EUR conversion
+      const productResults = await db
         .select({
+          date: productSearchTerms.date,
+          currency: productSearchTerms.campaignBudgetCurrencyCode,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
           orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
-          currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
         })
         .from(productSearchTerms)
-        .where(productConditions.length > 0 ? and(...productConditions) : undefined);
+        .where(productConditions.length > 0 ? and(...productConditions) : undefined)
+        .groupBy(productSearchTerms.date, productSearchTerms.campaignBudgetCurrencyCode);
 
-      // Combine results
-      const totalClicks = Number(brandResult[0]?.clicks || 0) + Number(productResult[0]?.clicks || 0);
-      const totalCost = Number(brandResult[0]?.cost || 0) + Number(productResult[0]?.cost || 0);
-      const totalSales = Number(brandResult[0]?.sales || 0) + Number(productResult[0]?.sales || 0);
-      const totalOrders = Number(brandResult[0]?.orders || 0) + Number(productResult[0]?.orders || 0);
-      const currency = brandResult[0]?.currency || productResult[0]?.currency || 'EUR';
+      // Get unique dates for exchange rate fetching
+      const uniqueDates = new Set<string>();
+      brandResults.forEach(row => row.date && uniqueDates.add(row.date));
+      productResults.forEach(row => row.date && uniqueDates.add(row.date));
 
-      const acos = calculateACOS(totalCost, totalSales);
-      const cpc = calculateCPC(totalCost, totalClicks);
-      const roas = calculateROAS(totalSales, totalCost);
+      // Fetch exchange rates for each unique date
+      const exchangeRatesCache = new Map<string, Record<string, number>>();
+      for (const date of Array.from(uniqueDates)) {
+        const rates = await getExchangeRatesForDate(date);
+        exchangeRatesCache.set(date, rates);
+      }
+
+      // Convert to EUR and aggregate
+      let totalClicks = 0;
+      let totalCostEur = 0;
+      let totalSalesEur = 0;
+      let totalOrders = 0;
+
+      // Process brand results
+      brandResults.forEach(row => {
+        if (!row.date) return;
+        
+        const rates = exchangeRatesCache.get(row.date) || {};
+        const costEur = convertToEur(Number(row.cost), row.currency || 'EUR', rates);
+        const salesEur = convertToEur(Number(row.sales), row.currency || 'EUR', rates);
+
+        totalClicks += Number(row.clicks);
+        totalCostEur += costEur;
+        totalSalesEur += salesEur;
+        totalOrders += Number(row.orders);
+      });
+
+      // Process product results
+      productResults.forEach(row => {
+        if (!row.date) return;
+        
+        const rates = exchangeRatesCache.get(row.date) || {};
+        const costEur = convertToEur(Number(row.cost), row.currency || 'EUR', rates);
+        const salesEur = convertToEur(Number(row.sales), row.currency || 'EUR', rates);
+
+        totalClicks += Number(row.clicks);
+        totalCostEur += costEur;
+        totalSalesEur += salesEur;
+        totalOrders += Number(row.orders);
+      });
+
+      const acos = calculateACOS(totalCostEur, totalSalesEur);
+      const cpc = calculateCPC(totalCostEur, totalClicks);
+      const roas = calculateROAS(totalSalesEur, totalCostEur);
 
       res.json({
-        adSales: totalSales,
+        adSales: totalSalesEur,
         acos,
         cpc,
-        cost: totalCost,
+        cost: totalCostEur,
         roas,
         orders: totalOrders,
         clicks: totalClicks,
-        currency,
+        currency: 'EUR',
       });
     } catch (error) {
       console.error('KPI error:', error);
