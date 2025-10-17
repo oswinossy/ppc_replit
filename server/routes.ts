@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { db } from "./db";
-import { searchTermsDaily, placementsDaily, recommendations } from "@shared/schema";
+import { brandSearchTerms, brandPlacement, productSearchTerms, productPlacement, recommendations } from "@shared/schema";
 import { sql, eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR, calculateROAS } from "./utils/calculations";
 import { generateBidRecommendation, detectNegativeKeywords } from "./utils/recommendations";
@@ -9,43 +9,71 @@ import * as XLSX from 'xlsx';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
-  // KPI aggregation endpoint
+  // KPI aggregation endpoint - combines brand + product data
   app.get("/api/kpis", async (req, res) => {
     try {
       const { country, campaignId, adGroupId, from, to } = req.query;
       
-      const conditions = [];
-      if (country) conditions.push(eq(searchTermsDaily.country, country as string));
-      if (campaignId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${campaignId}`);
-      if (adGroupId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${adGroupId}`);
-      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
+      // Build brand query
+      const brandConditions = [];
+      if (country) brandConditions.push(eq(brandSearchTerms.country, country as string));
+      if (campaignId) brandConditions.push(sql`${brandSearchTerms.campaignId}::text = ${campaignId}`);
+      if (adGroupId) brandConditions.push(sql`${brandSearchTerms.adGroupId}::text = ${adGroupId}`);
+      if (from) brandConditions.push(gte(brandSearchTerms.date, from as string));
+      if (to) brandConditions.push(lte(brandSearchTerms.date, to as string));
 
-      const result = await db
+      // Build product query
+      const productConditions = [];
+      if (country) productConditions.push(eq(productSearchTerms.country, country as string));
+      if (campaignId) productConditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
+      if (adGroupId) productConditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
+      if (from) productConditions.push(gte(productSearchTerms.date, from as string));
+      if (to) productConditions.push(lte(productSearchTerms.date, to as string));
+
+      // Query brand data (clean numeric columns)
+      const brandResult = await db
         .select({
-          totalClicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
-          totalCost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          totalSales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
-          totalOrders: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.purchases7d}, '')::numeric), 0)`,
-          currency: sql<string>`MAX(${searchTermsDaily.campaignBudgetCurrencyCode})`,
+          clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+          orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+          currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
         })
-        .from(searchTermsDaily)
-        .where(conditions.length > 0 ? and(...conditions) : undefined);
+        .from(brandSearchTerms)
+        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined);
 
-      const data = result[0];
-      const acos = calculateACOS(Number(data.totalCost), Number(data.totalSales));
-      const cpc = calculateCPC(Number(data.totalCost), Number(data.totalClicks));
-      const roas = calculateROAS(Number(data.totalSales), Number(data.totalCost));
+      // Query product data (TEXT columns need casting)
+      const productResult = await db
+        .select({
+          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
+        })
+        .from(productSearchTerms)
+        .where(productConditions.length > 0 ? and(...productConditions) : undefined);
+
+      // Combine results
+      const totalClicks = Number(brandResult[0]?.clicks || 0) + Number(productResult[0]?.clicks || 0);
+      const totalCost = Number(brandResult[0]?.cost || 0) + Number(productResult[0]?.cost || 0);
+      const totalSales = Number(brandResult[0]?.sales || 0) + Number(productResult[0]?.sales || 0);
+      const totalOrders = Number(brandResult[0]?.orders || 0) + Number(productResult[0]?.orders || 0);
+      const currency = brandResult[0]?.currency || productResult[0]?.currency || 'EUR';
+
+      const acos = calculateACOS(totalCost, totalSales);
+      const cpc = calculateCPC(totalCost, totalClicks);
+      const roas = calculateROAS(totalSales, totalCost);
 
       res.json({
-        adSales: Number(data.totalSales),
+        adSales: totalSales,
         acos,
         cpc,
-        cost: Number(data.totalCost),
+        cost: totalCost,
         roas,
-        orders: Number(data.totalOrders),
-        clicks: Number(data.totalClicks),
-        currency: data.currency || 'EUR',
+        orders: totalOrders,
+        clicks: totalClicks,
+        currency,
       });
     } catch (error) {
       console.error('KPI error:', error);
@@ -53,39 +81,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Countries list endpoint
+  // Countries list endpoint - combines brand + product
   app.get("/api/countries", async (req, res) => {
     try {
       const { from, to } = req.query;
       
-      const conditions = [];
-      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
+      // Query brand data
+      const brandConditions = [];
+      if (from) brandConditions.push(gte(brandSearchTerms.date, from as string));
+      if (to) brandConditions.push(lte(brandSearchTerms.date, to as string));
 
-      const results = await db
+      const brandResults = await db
         .select({
-          country: searchTermsDaily.country,
-          clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.purchases7d}, '')::numeric), 0)`,
-          currency: sql<string>`MAX(${searchTermsDaily.campaignBudgetCurrencyCode})`,
+          country: brandSearchTerms.country,
+          clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+          orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+          currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
         })
-        .from(searchTermsDaily)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(searchTermsDaily.country)
-        .orderBy(desc(sql`SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric)`));
+        .from(brandSearchTerms)
+        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
+        .groupBy(brandSearchTerms.country);
 
-      const countries = results.map(row => ({
-        country: row.country,
-        code: row.country,
-        clicks: Number(row.clicks),
-        cost: Number(row.cost),
-        sales: Number(row.sales),
-        orders: Number(row.orders),
-        acos: calculateACOS(Number(row.cost), Number(row.sales)),
-        currency: row.currency,
-      }));
+      // Query product data
+      const productConditions = [];
+      if (from) productConditions.push(gte(productSearchTerms.date, from as string));
+      if (to) productConditions.push(lte(productSearchTerms.date, to as string));
+
+      const productResults = await db
+        .select({
+          country: productSearchTerms.country,
+          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
+        })
+        .from(productSearchTerms)
+        .where(productConditions.length > 0 ? and(...productConditions) : undefined)
+        .groupBy(productSearchTerms.country);
+
+      // Combine by country
+      const countryMap = new Map();
+      
+      brandResults.forEach(row => {
+        if (row.country) {
+          countryMap.set(row.country, {
+            country: row.country,
+            clicks: Number(row.clicks),
+            cost: Number(row.cost),
+            sales: Number(row.sales),
+            orders: Number(row.orders),
+            currency: row.currency,
+          });
+        }
+      });
+
+      productResults.forEach(row => {
+        if (row.country) {
+          const existing = countryMap.get(row.country);
+          if (existing) {
+            existing.clicks += Number(row.clicks);
+            existing.cost += Number(row.cost);
+            existing.sales += Number(row.sales);
+            existing.orders += Number(row.orders);
+          } else {
+            countryMap.set(row.country, {
+              country: row.country,
+              clicks: Number(row.clicks),
+              cost: Number(row.cost),
+              sales: Number(row.sales),
+              orders: Number(row.orders),
+              currency: row.currency,
+            });
+          }
+        }
+      });
+
+      const countries = Array.from(countryMap.values())
+        .map(row => ({
+          country: row.country,
+          code: row.country,
+          clicks: row.clicks,
+          cost: row.cost,
+          sales: row.sales,
+          orders: row.orders,
+          acos: calculateACOS(row.cost, row.sales),
+          currency: row.currency,
+        }))
+        .sort((a, b) => b.sales - a.sales);
 
       res.json(countries);
     } catch (error) {
@@ -94,41 +179,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Campaigns by country endpoint
+  // Campaigns by country endpoint - combines brand + product
   app.get("/api/campaigns", async (req, res) => {
     try {
       const { country, from, to } = req.query;
       
-      const conditions = [];
-      if (country) conditions.push(eq(searchTermsDaily.country, country as string));
-      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
+      // Query brand campaigns
+      const brandConditions = [];
+      if (country) brandConditions.push(eq(brandSearchTerms.country, country as string));
+      if (from) brandConditions.push(gte(brandSearchTerms.date, from as string));
+      if (to) brandConditions.push(lte(brandSearchTerms.date, to as string));
 
-      const results = await db
+      const brandResults = await db
         .select({
-          campaignId: searchTermsDaily.campaignId,
-          campaignName: sql<string>`MAX(${searchTermsDaily.campaignName})`,
-          clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.purchases7d}, '')::numeric), 0)`,
-          currency: sql<string>`MAX(${searchTermsDaily.campaignBudgetCurrencyCode})`,
+          campaignId: brandSearchTerms.campaignId,
+          campaignName: sql<string>`MAX(${brandSearchTerms.campaignName})`,
+          clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+          orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+          currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
         })
-        .from(searchTermsDaily)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(searchTermsDaily.campaignId)
-        .orderBy(desc(sql`SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric)`));
+        .from(brandSearchTerms)
+        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
+        .groupBy(brandSearchTerms.campaignId);
 
-      const campaigns = results.map(row => ({
-        id: row.campaignId,
-        campaign: row.campaignName,
-        clicks: Number(row.clicks),
-        cost: Number(row.cost),
-        sales: Number(row.sales),
-        orders: Number(row.orders),
-        acos: calculateACOS(Number(row.cost), Number(row.sales)),
-        currency: row.currency,
-      }));
+      // Query product campaigns
+      const productConditions = [];
+      if (country) productConditions.push(eq(productSearchTerms.country, country as string));
+      if (from) productConditions.push(gte(productSearchTerms.date, from as string));
+      if (to) productConditions.push(lte(productSearchTerms.date, to as string));
+
+      const productResults = await db
+        .select({
+          campaignId: productSearchTerms.campaignId,
+          campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
+          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
+        })
+        .from(productSearchTerms)
+        .where(productConditions.length > 0 ? and(...productConditions) : undefined)
+        .groupBy(productSearchTerms.campaignId);
+
+      // Combine by campaign ID
+      const campaignMap = new Map();
+      
+      brandResults.forEach(row => {
+        if (row.campaignId) {
+          campaignMap.set(String(row.campaignId), {
+            id: row.campaignId,
+            campaign: row.campaignName,
+            clicks: Number(row.clicks),
+            cost: Number(row.cost),
+            sales: Number(row.sales),
+            orders: Number(row.orders),
+            currency: row.currency,
+          });
+        }
+      });
+
+      productResults.forEach(row => {
+        if (row.campaignId) {
+          const key = String(row.campaignId);
+          const existing = campaignMap.get(key);
+          if (existing) {
+            existing.clicks += Number(row.clicks);
+            existing.cost += Number(row.cost);
+            existing.sales += Number(row.sales);
+            existing.orders += Number(row.orders);
+          } else {
+            campaignMap.set(key, {
+              id: row.campaignId,
+              campaign: row.campaignName,
+              clicks: Number(row.clicks),
+              cost: Number(row.cost),
+              sales: Number(row.sales),
+              orders: Number(row.orders),
+              currency: row.currency,
+            });
+          }
+        }
+      });
+
+      const campaigns = Array.from(campaignMap.values())
+        .map(row => ({
+          ...row,
+          acos: calculateACOS(row.cost, row.sales),
+        }))
+        .sort((a, b) => b.sales - a.sales);
 
       res.json(campaigns);
     } catch (error) {
@@ -137,41 +278,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Ad groups by campaign endpoint
+  // Ad groups by campaign endpoint - combines brand + product
   app.get("/api/ad-groups", async (req, res) => {
     try {
       const { campaignId, from, to } = req.query;
       
-      const conditions = [];
-      if (campaignId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${campaignId}`);
-      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
+      // Query brand ad groups
+      const brandConditions = [];
+      if (campaignId) brandConditions.push(sql`${brandSearchTerms.campaignId}::text = ${campaignId}`);
+      if (from) brandConditions.push(gte(brandSearchTerms.date, from as string));
+      if (to) brandConditions.push(lte(brandSearchTerms.date, to as string));
 
-      const results = await db
+      const brandResults = await db
         .select({
-          adGroupId: searchTermsDaily.adGroupId,
-          adGroupName: sql<string>`MAX(${searchTermsDaily.adGroupName})`,
-          clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.purchases7d}, '')::numeric), 0)`,
-          currency: sql<string>`MAX(${searchTermsDaily.campaignBudgetCurrencyCode})`,
+          adGroupId: brandSearchTerms.adGroupId,
+          adGroupName: sql<string>`MAX(${brandSearchTerms.adGroupName})`,
+          clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+          orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+          currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
         })
-        .from(searchTermsDaily)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(searchTermsDaily.adGroupId)
-        .orderBy(desc(sql`SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric)`));
+        .from(brandSearchTerms)
+        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
+        .groupBy(brandSearchTerms.adGroupId);
 
-      const adGroups = results.map(row => ({
-        id: row.adGroupId,
-        adGroup: row.adGroupName,
-        clicks: Number(row.clicks),
-        cost: Number(row.cost),
-        sales: Number(row.sales),
-        orders: Number(row.orders),
-        acos: calculateACOS(Number(row.cost), Number(row.sales)),
-        currency: row.currency,
-      }));
+      // Query product ad groups
+      const productConditions = [];
+      if (campaignId) productConditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
+      if (from) productConditions.push(gte(productSearchTerms.date, from as string));
+      if (to) productConditions.push(lte(productSearchTerms.date, to as string));
+
+      const productResults = await db
+        .select({
+          adGroupId: productSearchTerms.adGroupId,
+          adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
+          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
+        })
+        .from(productSearchTerms)
+        .where(productConditions.length > 0 ? and(...productConditions) : undefined)
+        .groupBy(productSearchTerms.adGroupId);
+
+      // Combine by ad group ID
+      const adGroupMap = new Map();
+      
+      brandResults.forEach(row => {
+        if (row.adGroupId) {
+          adGroupMap.set(String(row.adGroupId), {
+            id: row.adGroupId,
+            adGroup: row.adGroupName,
+            clicks: Number(row.clicks),
+            cost: Number(row.cost),
+            sales: Number(row.sales),
+            orders: Number(row.orders),
+            currency: row.currency,
+          });
+        }
+      });
+
+      productResults.forEach(row => {
+        if (row.adGroupId) {
+          const key = String(row.adGroupId);
+          const existing = adGroupMap.get(key);
+          if (existing) {
+            existing.clicks += Number(row.clicks);
+            existing.cost += Number(row.cost);
+            existing.sales += Number(row.sales);
+            existing.orders += Number(row.orders);
+          } else {
+            adGroupMap.set(key, {
+              id: row.adGroupId,
+              adGroup: row.adGroupName,
+              clicks: Number(row.clicks),
+              cost: Number(row.cost),
+              sales: Number(row.sales),
+              orders: Number(row.orders),
+              currency: row.currency,
+            });
+          }
+        }
+      });
+
+      const adGroups = Array.from(adGroupMap.values())
+        .map(row => ({
+          ...row,
+          acos: calculateACOS(row.cost, row.sales),
+        }))
+        .sort((a, b) => b.sales - a.sales);
 
       res.json(adGroups);
     } catch (error) {
@@ -180,45 +377,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Search terms by ad group endpoint
+  // Search terms by ad group endpoint - combines brand + product
   app.get("/api/search-terms", async (req, res) => {
     try {
       const { adGroupId, from, to } = req.query;
       
-      const conditions = [];
-      if (adGroupId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${adGroupId}`);
-      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
+      // Query brand search terms
+      const brandConditions = [];
+      if (adGroupId) brandConditions.push(sql`${brandSearchTerms.adGroupId}::text = ${adGroupId}`);
+      if (from) brandConditions.push(gte(brandSearchTerms.date, from as string));
+      if (to) brandConditions.push(lte(brandSearchTerms.date, to as string));
 
-      const results = await db
+      const brandResults = await db
         .select({
-          searchTerm: sql<string>`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`,
-          matchType: sql<string>`MAX(${searchTermsDaily.matchType})`,
-          clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.purchases7d}, '')::numeric), 0)`,
-          currentBid: sql<number>`MAX(${searchTermsDaily.keywordBid})`,
-          currency: sql<string>`MAX(${searchTermsDaily.campaignBudgetCurrencyCode})`,
+          searchTerm: brandSearchTerms.searchTerm,
+          keyword: sql<string>`MAX(${brandSearchTerms.keywordText})`,
+          matchType: sql<string>`MAX(${brandSearchTerms.matchType})`,
+          keywordBid: sql<number>`MAX(${brandSearchTerms.keywordBid})`,
+          clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+          orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+          currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
         })
-        .from(searchTermsDaily)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(sql`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`)
-        .orderBy(desc(sql`SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric)`));
+        .from(brandSearchTerms)
+        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
+        .groupBy(brandSearchTerms.searchTerm);
 
-      const searchTerms = results.map(row => ({
-        searchTerm: row.searchTerm,
-        matchType: row.matchType,
-        clicks: Number(row.clicks),
-        cost: Number(row.cost),
-        sales: Number(row.sales),
-        orders: Number(row.orders),
-        cpc: calculateCPC(Number(row.cost), Number(row.clicks)),
-        cvr: calculateCVR(Number(row.orders), Number(row.clicks)),
-        acos: calculateACOS(Number(row.cost), Number(row.sales)),
-        currentBid: Number(row.currentBid),
-        currency: row.currency,
-      }));
+      // Query product search terms
+      const productConditions = [];
+      if (adGroupId) productConditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
+      if (from) productConditions.push(gte(productSearchTerms.date, from as string));
+      if (to) productConditions.push(lte(productSearchTerms.date, to as string));
+
+      const productResults = await db
+        .select({
+          searchTerm: productSearchTerms.searchTerm,
+          keyword: sql<string>`MAX(${productSearchTerms.keyword})`,
+          matchType: sql<string>`MAX(${productSearchTerms.matchType})`,
+          keywordBid: sql<number>`MAX(${productSearchTerms.keywordBid})`,
+          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
+        })
+        .from(productSearchTerms)
+        .where(productConditions.length > 0 ? and(...productConditions) : undefined)
+        .groupBy(productSearchTerms.searchTerm);
+
+      // Combine by search term
+      const searchTermMap = new Map();
+      
+      brandResults.forEach(row => {
+        if (row.searchTerm) {
+          searchTermMap.set(row.searchTerm, {
+            searchTerm: row.searchTerm,
+            keyword: row.keyword,
+            matchType: row.matchType,
+            keywordBid: Number(row.keywordBid || 0),
+            clicks: Number(row.clicks),
+            cost: Number(row.cost),
+            sales: Number(row.sales),
+            orders: Number(row.orders),
+            currency: row.currency,
+          });
+        }
+      });
+
+      productResults.forEach(row => {
+        if (row.searchTerm) {
+          const existing = searchTermMap.get(row.searchTerm);
+          if (existing) {
+            existing.clicks += Number(row.clicks);
+            existing.cost += Number(row.cost);
+            existing.sales += Number(row.sales);
+            existing.orders += Number(row.orders);
+          } else {
+            searchTermMap.set(row.searchTerm, {
+              searchTerm: row.searchTerm,
+              keyword: row.keyword,
+              matchType: row.matchType,
+              keywordBid: Number(row.keywordBid || 0),
+              clicks: Number(row.clicks),
+              cost: Number(row.cost),
+              sales: Number(row.sales),
+              orders: Number(row.orders),
+              currency: row.currency,
+            });
+          }
+        }
+      });
+
+      const searchTerms = Array.from(searchTermMap.values())
+        .map(row => {
+          const acos = calculateACOS(row.cost, row.sales);
+          const recommendation = generateBidRecommendation(
+            row.clicks,
+            row.cost,
+            row.sales,
+            row.keywordBid,
+            0.20 // target 20% ACOS
+          );
+
+          return {
+            searchTerm: row.searchTerm,
+            keyword: row.keyword,
+            matchType: row.matchType,
+            clicks: row.clicks,
+            cost: row.cost,
+            sales: row.sales,
+            orders: row.orders,
+            acos,
+            currentBid: row.keywordBid,
+            recommendedBid: recommendation.recommendedBid,
+            bidChange: recommendation.bidChange,
+            confidence: recommendation.confidence,
+            currency: row.currency,
+          };
+        })
+        .sort((a, b) => b.clicks - a.clicks);
 
       res.json(searchTerms);
     } catch (error) {
@@ -227,38 +505,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Placements by campaign endpoint
+  // Placements by campaign endpoint - combines brand + product
   app.get("/api/placements", async (req, res) => {
     try {
       const { campaignId, country, from, to } = req.query;
       
-      const conditions = [];
-      if (campaignId) conditions.push(sql`${placementsDaily.campaignId}::text = ${campaignId}`);
-      if (country) conditions.push(eq(placementsDaily.country, country as string));
-      if (from) conditions.push(gte(placementsDaily.date, from as string));
-      if (to) conditions.push(lte(placementsDaily.date, to as string));
+      // Query brand placements
+      const brandConditions = [];
+      if (campaignId) brandConditions.push(sql`${brandPlacement.campaignId}::text = ${campaignId}`);
+      if (country) brandConditions.push(eq(brandPlacement.country, country as string));
+      if (from) brandConditions.push(gte(brandPlacement.date, from as string));
+      if (to) brandConditions.push(lte(brandPlacement.date, to as string));
 
-      const results = await db
+      const brandResults = await db
         .select({
-          placement: placementsDaily.campaignPlacement,
-          clicks: sql<number>`COALESCE(SUM(NULLIF(${placementsDaily.clicks}, '')::numeric), 0)`,
-          cost: sql<number>`COALESCE(SUM(NULLIF(${placementsDaily.cost}, '')::numeric), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${placementsDaily.sales7d}, '')::numeric), 0)`,
-          purchases: sql<number>`COALESCE(SUM(NULLIF(${placementsDaily.purchases7d}, '')::numeric), 0)`,
+          placement: sql<string>`'Brand'`, // Brand doesn't have placement types, label as 'Brand'
+          clicks: sql<number>`COALESCE(SUM(${brandPlacement.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${brandPlacement.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(${brandPlacement.sales}), 0)`,
+          purchases: sql<number>`COALESCE(SUM(${brandPlacement.purchases}), 0)`,
         })
-        .from(placementsDaily)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(placementsDaily.campaignPlacement)
-        .orderBy(desc(sql`COALESCE(SUM(NULLIF(${placementsDaily.sales7d}, '')::numeric), 0)`));
+        .from(brandPlacement)
+        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined);
 
-      const placements = results.map(row => ({
-        placement: row.placement || 'UNKNOWN',
-        clicks: Number(row.clicks),
-        cost: Number(row.cost),
-        sales: Number(row.sales),
-        orders: Number(row.purchases),
-        acos: calculateACOS(Number(row.cost), Number(row.sales)),
-      }));
+      // Query product placements
+      const productConditions = [];
+      if (campaignId) productConditions.push(sql`${productPlacement.campaignId}::text = ${campaignId}`);
+      if (country) productConditions.push(eq(productPlacement.country, country as string));
+      if (from) productConditions.push(gte(productPlacement.date, from as string));
+      if (to) productConditions.push(lte(productPlacement.date, to as string));
+
+      const productResults = await db
+        .select({
+          placement: productPlacement.campaignPlacement,
+          clicks: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.clicks}, '')::numeric), 0)`,
+          cost: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.cost}, '')::numeric), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.sales7d}, '')::numeric), 0)`,
+          purchases: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.purchases7d}, '')::numeric), 0)`,
+        })
+        .from(productPlacement)
+        .where(productConditions.length > 0 ? and(...productConditions) : undefined)
+        .groupBy(productPlacement.campaignPlacement);
+
+      // Combine placements
+      const placements = [...brandResults, ...productResults]
+        .filter(row => row.placement)
+        .map(row => ({
+          placement: row.placement || 'UNKNOWN',
+          clicks: Number(row.clicks),
+          cost: Number(row.cost),
+          sales: Number(row.sales),
+          orders: Number(row.purchases),
+          acos: calculateACOS(Number(row.cost), Number(row.sales)),
+        }))
+        .sort((a, b) => b.sales - a.sales);
 
       res.json(placements);
     } catch (error) {
@@ -267,52 +567,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Chart data endpoint with aggregation
+  // Chart data endpoint with aggregation - combines brand + product
   app.get("/api/chart-data", async (req, res) => {
     try {
-      const { country, campaignId, adGroupId, from, to, grain = 'daily' } = req.query;
+      const { country, campaignId, from, to, groupBy = 'daily' } = req.query;
       
-      const conditions = [];
-      if (country) conditions.push(eq(searchTermsDaily.country, country as string));
-      if (campaignId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${campaignId}`);
-      if (adGroupId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${adGroupId}`);
-      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
+      // Build brand conditions
+      const brandConditions = [];
+      if (country) brandConditions.push(eq(brandSearchTerms.country, country as string));
+      if (campaignId) brandConditions.push(sql`${brandSearchTerms.campaignId}::text = ${campaignId}`);
+      if (from) brandConditions.push(gte(brandSearchTerms.date, from as string));
+      if (to) brandConditions.push(lte(brandSearchTerms.date, to as string));
 
-      let dateGroupSelect;
-      let dateGroupBy;
-      let dateOrderBy;
-      
-      if (grain === 'weekly') {
-        dateGroupSelect = sql<string>`DATE_TRUNC('week', ${searchTermsDaily.date}::date)`;
-        dateGroupBy = sql`DATE_TRUNC('week', ${searchTermsDaily.date}::date)`;
-        dateOrderBy = sql`DATE_TRUNC('week', ${searchTermsDaily.date}::date)`;
-      } else if (grain === 'monthly') {
-        dateGroupSelect = sql<string>`DATE_TRUNC('month', ${searchTermsDaily.date}::date)`;
-        dateGroupBy = sql`DATE_TRUNC('month', ${searchTermsDaily.date}::date)`;
-        dateOrderBy = sql`DATE_TRUNC('month', ${searchTermsDaily.date}::date)`;
+      // Build product conditions
+      const productConditions = [];
+      if (country) productConditions.push(eq(productSearchTerms.country, country as string));
+      if (campaignId) productConditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
+      if (from) productConditions.push(gte(productSearchTerms.date, from as string));
+      if (to) productConditions.push(lte(productSearchTerms.date, to as string));
+
+      // Determine date grouping
+      let dateGroup;
+      if (groupBy === 'weekly') {
+        dateGroup = sql`DATE_TRUNC('week', ${brandSearchTerms.date})`;
+      } else if (groupBy === 'monthly') {
+        dateGroup = sql`DATE_TRUNC('month', ${brandSearchTerms.date})`;
       } else {
-        dateGroupSelect = searchTermsDaily.date;
-        dateGroupBy = searchTermsDaily.date;
-        dateOrderBy = searchTermsDaily.date;
+        dateGroup = brandSearchTerms.date; // daily (already in date format)
       }
 
-      const results = await db
+      // Query brand data
+      const brandResults = await db
         .select({
-          date: dateGroupSelect,
-          cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
+          date: sql<string>`${dateGroup}::text`,
+          cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
         })
-        .from(searchTermsDaily)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(dateGroupBy)
-        .orderBy(asc(dateOrderBy));
+        .from(brandSearchTerms)
+        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
+        .groupBy(sql`${dateGroup}`)
+        .orderBy(asc(sql`${dateGroup}`));
 
-      const chartData = results.map(row => ({
-        date: new Date(row.date as string).toISOString().split('T')[0],
-        acos: calculateACOS(Number(row.cost), Number(row.sales)),
-        sales: Number(row.sales),
-      }));
+      // Query product data
+      let productDateGroup;
+      if (groupBy === 'weekly') {
+        productDateGroup = sql`DATE_TRUNC('week', ${productSearchTerms.date}::date)`;
+      } else if (groupBy === 'monthly') {
+        productDateGroup = sql`DATE_TRUNC('month', ${productSearchTerms.date}::date)`;
+      } else {
+        productDateGroup = sql`${productSearchTerms.date}::date`;
+      }
+
+      const productResults = await db
+        .select({
+          date: sql<string>`${productDateGroup}::text`,
+          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+        })
+        .from(productSearchTerms)
+        .where(productConditions.length > 0 ? and(...productConditions) : undefined)
+        .groupBy(sql`${productDateGroup}`)
+        .orderBy(asc(sql`${productDateGroup}`));
+
+      // Combine by date
+      const dateMap = new Map();
+      
+      brandResults.forEach(row => {
+        const date = row.date.split('T')[0]; // Extract date part
+        dateMap.set(date, {
+          date,
+          cost: Number(row.cost),
+          sales: Number(row.sales),
+        });
+      });
+
+      productResults.forEach(row => {
+        const date = row.date.split('T')[0]; // Extract date part
+        const existing = dateMap.get(date);
+        if (existing) {
+          existing.cost += Number(row.cost);
+          existing.sales += Number(row.sales);
+        } else {
+          dateMap.set(date, {
+            date,
+            cost: Number(row.cost),
+            sales: Number(row.sales),
+          });
+        }
+      });
+
+      const chartData = Array.from(dateMap.values())
+        .map(row => ({
+          date: row.date,
+          acos: calculateACOS(row.cost, row.sales),
+          sales: row.sales,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date));
 
       res.json(chartData);
     } catch (error) {
@@ -321,122 +671,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Generate recommendations endpoint
-  app.post("/api/recommendations/generate", async (req, res) => {
-    try {
-      const { scope, scopeId, from, to, targetAcos = 20 } = req.body;
-      
-      const conditions = [];
-      if (scope === 'country' && scopeId) conditions.push(eq(searchTermsDaily.country, scopeId));
-      if (scope === 'campaign' && scopeId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${scopeId}`);
-      if (scope === 'ad_group' && scopeId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${scopeId}`);
-      if (from) conditions.push(gte(searchTermsDaily.date, from));
-      if (to) conditions.push(lte(searchTermsDaily.date, to));
-
-      // Get search terms data
-      const results = await db
-        .select({
-          searchTerm: sql<string>`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`,
-          clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
-          currentBid: sql<number>`MAX(${searchTermsDaily.keywordBid})`,
-        })
-        .from(searchTermsDaily)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(sql`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`);
-
-      // Calculate median CPC for the ad group
-      const costs = results.map(r => Number(r.cost));
-      const clicks = results.map(r => Number(r.clicks));
-      const totalCost = costs.reduce((sum, c) => sum + c, 0);
-      const totalClicks = clicks.reduce((sum, c) => sum + c, 0);
-      const adGroupMedianCPC = totalClicks > 0 ? totalCost / totalClicks : 1.0;
-
-      // Generate recommendations
-      const recommendations = results
-        .map(row => generateBidRecommendation(
-          {
-            searchTerm: row.searchTerm,
-            clicks: Number(row.clicks),
-            cost: Number(row.cost),
-            sales: Number(row.sales),
-            currentBid: row.currentBid ? Number(row.currentBid) : null,
-            cpc: Number(row.clicks) > 0 ? Number(row.cost) / Number(row.clicks) : 0,
-          },
-          targetAcos,
-          adGroupMedianCPC
-        ))
-        .filter(rec => rec !== null);
-
-      // Save to database
-      await db.insert(recommendations as any).values({
-        scope,
-        scopeId: scopeId || null,
-        generatedFor: `${from}-${to}`,
-        targetAcos: targetAcos.toString(),
-        items: JSON.stringify(recommendations),
-      });
-
-      res.json({ recommendations, count: recommendations.length });
-    } catch (error) {
-      console.error('Recommendations error:', error);
-      res.status(500).json({ error: 'Failed to generate recommendations' });
-    }
-  });
-
   // Negative keywords endpoint
   app.get("/api/negative-keywords", async (req, res) => {
     try {
-      const { country, campaignId, adGroupId, from, to } = req.query;
+      const { adGroupId, campaignId } = req.query;
       
+      // For now, detect from product search terms only (brand has different structure)
       const conditions = [];
-      if (country) conditions.push(eq(searchTermsDaily.country, country as string));
-      if (campaignId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${campaignId}`);
-      if (adGroupId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${adGroupId}`);
-      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
+      if (adGroupId) conditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
+      if (campaignId) conditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
 
       const results = await db
         .select({
-          searchTerm: sql<string>`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`,
-          clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
-          country: sql<string>`MAX(${searchTermsDaily.country})`,
-          campaignName: sql<string>`MAX(${searchTermsDaily.campaignName})`,
-          adGroupName: sql<string>`MAX(${searchTermsDaily.adGroupName})`,
+          searchTerm: productSearchTerms.searchTerm,
+          campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
+          adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
+          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
         })
-        .from(searchTermsDaily)
+        .from(productSearchTerms)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(sql`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`);
+        .groupBy(productSearchTerms.searchTerm);
 
-      const terms = results.map(row => ({
-        searchTerm: row.searchTerm,
-        clicks: Number(row.clicks),
-        cost: Number(row.cost),
-        sales: Number(row.sales),
-        cpc: Number(row.clicks) > 0 ? Number(row.cost) / Number(row.clicks) : 0,
-        currentBid: null,
-        country: row.country,
-        campaign: row.campaignName,
-        adGroup: row.adGroupName,
-      }));
+      const negatives = detectNegativeKeywords(
+        results.map(row => ({
+          searchTerm: row.searchTerm || '',
+          campaignName: row.campaignName,
+          adGroupName: row.adGroupName,
+          clicks: Number(row.clicks),
+          sales: Number(row.sales),
+        }))
+      );
 
-      const negatives = detectNegativeKeywords(terms);
-
-      // Add country/campaign/adGroup info
-      const enrichedNegatives = negatives.map(neg => {
-        const term = terms.find(t => t.searchTerm === neg.searchTerm);
-        return {
-          ...neg,
-          country: term?.country,
-          campaign: term?.campaign,
-          adGroup: term?.adGroup,
-        };
-      });
-
-      res.json(enrichedNegatives);
+      res.json(negatives);
     } catch (error) {
       console.error('Negative keywords error:', error);
       res.status(500).json({ error: 'Failed to fetch negative keywords' });
@@ -446,69 +713,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Export negative keywords as Excel
   app.get("/api/exports/negatives.xlsx", async (req, res) => {
     try {
-      const { country, campaignId, adGroupId, from, to } = req.query;
+      const { adGroupId, campaignId } = req.query;
       
       const conditions = [];
-      if (country) conditions.push(eq(searchTermsDaily.country, country as string));
-      if (campaignId) conditions.push(sql`${searchTermsDaily.campaignId}::text = ${campaignId}`);
-      if (adGroupId) conditions.push(sql`${searchTermsDaily.adGroupId}::text = ${adGroupId}`);
-      if (from) conditions.push(gte(searchTermsDaily.date, from as string));
-      if (to) conditions.push(lte(searchTermsDaily.date, to as string));
+      if (adGroupId) conditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
+      if (campaignId) conditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
 
       const results = await db
         .select({
-          searchTerm: sql<string>`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`,
-          clicks: sql<number>`COALESCE(SUM(${searchTermsDaily.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${searchTermsDaily.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${searchTermsDaily.sales7d}, '')::numeric), 0)`,
-          country: sql<string>`MAX(${searchTermsDaily.country})`,
-          campaignName: sql<string>`MAX(${searchTermsDaily.campaignName})`,
-          adGroupName: sql<string>`MAX(${searchTermsDaily.adGroupName})`,
+          searchTerm: productSearchTerms.searchTerm,
+          campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
+          adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
+          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
         })
-        .from(searchTermsDaily)
+        .from(productSearchTerms)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(sql`COALESCE(${searchTermsDaily.searchTerm}, ${searchTermsDaily.targeting})`);
+        .groupBy(productSearchTerms.searchTerm);
 
-      const terms = results.map(row => ({
-        searchTerm: row.searchTerm,
-        clicks: Number(row.clicks),
-        cost: Number(row.cost),
-        sales: Number(row.sales),
-        cpc: 0,
-        currentBid: null,
-        country: row.country,
-        campaign: row.campaignName,
-        adGroup: row.adGroupName,
-      }));
+      const negatives = detectNegativeKeywords(
+        results.map(row => ({
+          searchTerm: row.searchTerm || '',
+          campaignName: row.campaignName,
+          adGroupName: row.adGroupName,
+          clicks: Number(row.clicks),
+          sales: Number(row.sales),
+        }))
+      );
 
-      const negatives = detectNegativeKeywords(terms);
+      const worksheet = XLSX.utils.json_to_sheet(negatives);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Negative Keywords');
 
-      const excelData = negatives.map(neg => {
-        const term = terms.find(t => t.searchTerm === neg.searchTerm);
-        return {
-          Country: term?.country,
-          Campaign: term?.campaign,
-          'Ad Group': term?.adGroup,
-          Term: neg.searchTerm,
-          Type: neg.type,
-          Clicks: neg.clicks,
-          Cost: neg.cost.toFixed(2),
-          Rationale: neg.rationale,
-        };
-      });
+      const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(excelData);
-      XLSX.utils.book_append_sheet(wb, ws, 'Negative Keywords');
-
-      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
-      res.setHeader('Content-Disposition', 'attachment; filename=negative_keywords.xlsx');
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename=negative-keywords.xlsx');
       res.send(buffer);
     } catch (error) {
       console.error('Export error:', error);
-      res.status(500).json({ error: 'Failed to export negative keywords' });
+      res.status(500).json({ error: 'Failed to export negatives' });
     }
   });
 
