@@ -5,6 +5,7 @@ import { brandSearchTerms, brandPlacement, productSearchTerms, productPlacement,
 import { sql, eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR, calculateROAS, getConfidenceLevel } from "./utils/calculations";
 import { generateBidRecommendation, detectNegativeKeywords } from "./utils/recommendations";
+import { getExchangeRatesForDate, convertToEur } from "./utils/exchangeRates";
 import * as XLSX from 'xlsx';
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -81,12 +82,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Countries list endpoint - combines brand + product
+  // Countries list endpoint - combines brand + product with EUR conversion
   app.get("/api/countries", async (req, res) => {
     try {
       const { from, to } = req.query;
       
-      // Query brand data
+      // Query brand data grouped by country, date, and currency
       const brandConditions = [];
       if (from) brandConditions.push(gte(brandSearchTerms.date, from as string));
       if (to) brandConditions.push(lte(brandSearchTerms.date, to as string));
@@ -94,17 +95,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const brandResults = await db
         .select({
           country: brandSearchTerms.country,
+          date: brandSearchTerms.date,
+          currency: brandSearchTerms.campaignBudgetCurrencyCode,
           clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
           orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
-          currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
         })
         .from(brandSearchTerms)
         .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
-        .groupBy(brandSearchTerms.country);
+        .groupBy(brandSearchTerms.country, brandSearchTerms.date, brandSearchTerms.campaignBudgetCurrencyCode);
 
-      // Query product data
+      // Query product data grouped by country, date, and currency
       const productConditions = [];
       if (from) productConditions.push(gte(productSearchTerms.date, from as string));
       if (to) productConditions.push(lte(productSearchTerms.date, to as string));
@@ -112,63 +114,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const productResults = await db
         .select({
           country: productSearchTerms.country,
+          date: productSearchTerms.date,
+          currency: productSearchTerms.campaignBudgetCurrencyCode,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
           orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
-          currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
         })
         .from(productSearchTerms)
         .where(productConditions.length > 0 ? and(...productConditions) : undefined)
-        .groupBy(productSearchTerms.country);
+        .groupBy(productSearchTerms.country, productSearchTerms.date, productSearchTerms.campaignBudgetCurrencyCode);
 
-      // Combine by country
-      const countryMap = new Map();
-      
+      // Get unique dates for exchange rate fetching
+      const uniqueDates = new Set<string>();
+      brandResults.forEach(row => row.date && uniqueDates.add(row.date));
+      productResults.forEach(row => row.date && uniqueDates.add(row.date));
+
+      // Fetch exchange rates for each unique date
+      const exchangeRatesCache = new Map<string, Record<string, number>>();
+      for (const date of Array.from(uniqueDates)) {
+        const rates = await getExchangeRatesForDate(date);
+        exchangeRatesCache.set(date, rates);
+      }
+
+      // Combine and convert to EUR
+      const countryMap = new Map<string, {
+        country: string;
+        clicks: number;
+        costEur: number;
+        salesEur: number;
+        orders: number;
+      }>();
+
+      // Process brand results
       brandResults.forEach(row => {
-        if (row.country) {
+        if (!row.country || !row.date) return;
+        
+        const rates = exchangeRatesCache.get(row.date) || {};
+        const costEur = convertToEur(Number(row.cost), row.currency || 'EUR', rates);
+        const salesEur = convertToEur(Number(row.sales), row.currency || 'EUR', rates);
+
+        const existing = countryMap.get(row.country);
+        if (existing) {
+          existing.clicks += Number(row.clicks);
+          existing.costEur += costEur;
+          existing.salesEur += salesEur;
+          existing.orders += Number(row.orders);
+        } else {
           countryMap.set(row.country, {
             country: row.country,
             clicks: Number(row.clicks),
-            cost: Number(row.cost),
-            sales: Number(row.sales),
+            costEur,
+            salesEur,
             orders: Number(row.orders),
-            currency: row.currency,
           });
         }
       });
 
+      // Process product results
       productResults.forEach(row => {
-        if (row.country) {
-          const existing = countryMap.get(row.country);
-          if (existing) {
-            existing.clicks += Number(row.clicks);
-            existing.cost += Number(row.cost);
-            existing.sales += Number(row.sales);
-            existing.orders += Number(row.orders);
-          } else {
-            countryMap.set(row.country, {
-              country: row.country,
-              clicks: Number(row.clicks),
-              cost: Number(row.cost),
-              sales: Number(row.sales),
-              orders: Number(row.orders),
-              currency: row.currency,
-            });
-          }
+        if (!row.country || !row.date) return;
+        
+        const rates = exchangeRatesCache.get(row.date) || {};
+        const costEur = convertToEur(Number(row.cost), row.currency || 'EUR', rates);
+        const salesEur = convertToEur(Number(row.sales), row.currency || 'EUR', rates);
+
+        const existing = countryMap.get(row.country);
+        if (existing) {
+          existing.clicks += Number(row.clicks);
+          existing.costEur += costEur;
+          existing.salesEur += salesEur;
+          existing.orders += Number(row.orders);
+        } else {
+          countryMap.set(row.country, {
+            country: row.country,
+            clicks: Number(row.clicks),
+            costEur,
+            salesEur,
+            orders: Number(row.orders),
+          });
         }
       });
 
+      // Format response with EUR values
       const countries = Array.from(countryMap.values())
         .map(row => ({
           country: row.country,
           code: row.country,
           clicks: row.clicks,
-          cost: row.cost,
-          sales: row.sales,
+          cost: row.costEur,
+          sales: row.salesEur,
           orders: row.orders,
-          acos: calculateACOS(row.cost, row.sales),
-          currency: row.currency,
+          acos: calculateACOS(row.costEur, row.salesEur),
+          currency: 'EUR', // All values now in EUR
         }))
         .sort((a, b) => b.sales - a.sales);
 
