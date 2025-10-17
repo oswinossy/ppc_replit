@@ -37,10 +37,11 @@ The app will be available on port 5000.
 ### Core Features
 - **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Search Terms
 - **Unified Analytics**: Combines brand and product campaign data into single views
+- **EUR Currency Conversion**: All metrics displayed in EUR using daily ECB exchange rates
 - **Placement Analysis**: Campaign-level placement performance (TOS, ROS, PP, UNKNOWN)
 - **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders
 - **Performance Charts**: Weekly aggregated ACOS and sales trends
-- **Bid Recommendations**: 20% ACOS targeting with confidence levels
+- **Bid Recommendations**: 20% ACOS targeting with confidence levels (shown for ALL search terms)
 - **Negative Keywords**: Auto-detection with ≥20 clicks, $0 sales
 - **Excel Export**: Download negative keywords for bulk upload
 
@@ -57,6 +58,18 @@ The app will be available on port 5000.
   - ACOS <16%: +10% to +20% (scale with data)
   - Standard: ACOS-based optimization
   - Safeguards: 20%-150% of base bid
+
+### Currency Conversion System
+- **Automatic EUR Conversion**: All sales, costs, and derived metrics displayed in EUR
+- **Daily Exchange Rates**: Uses Frankfurter API (European Central Bank rates)
+- **Supported Currencies**: EUR, USD, GBP, SEK, PLN
+- **Date Handling**: Future dates use latest available rates, historical dates use exact daily rates
+- **Conversion Logic**:
+  1. Query data grouped by country, date, and currency
+  2. Fetch ECB exchange rates for each unique date
+  3. Convert cost/sales to EUR: `eurValue = originalValue × toEurRate`
+  4. Aggregate all countries in EUR
+- **API**: Free Frankfurter API (no API key required, no rate limits)
 
 ### Navigation
 - Sticky header with branding and export
@@ -141,6 +154,15 @@ Example response structure:
 - Responsive grid layouts
 
 ## Recent Changes
+- **2025-10-17**: ✅ Implemented EUR currency conversion using daily ECB exchange rates
+  - Created exchange rate utility using Frankfurter API (free, no key required)
+  - Updated countries endpoint to convert all sales/costs to EUR
+  - Handles future dates by using latest available rates
+  - All dashboard metrics now displayed in EUR with proper aggregation
+- **2025-10-17**: ✅ Added "Bid Recommendation" column to search terms table
+  - Shows recommended bids for ALL search terms (not just 30+ clicks)
+  - Inline display in main table for easy comparison with current bids
+  - Uses PPC AI logic: increase for ACOS <16%, decrease for ACOS >20%
 - **2025-10-17**: ✅ Fixed CPC/CVR rendering bug - added calculated fields to API response
 - **2025-10-17**: ✅ Added null guards to all toFixed() calls in frontend
 - **2025-10-17**: ✅ E2E tests passing - €157k sales, 22% ACOS (combined brand + product)
