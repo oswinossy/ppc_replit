@@ -71,6 +71,13 @@ The app will be available on port 5000.
   4. Aggregate all countries in EUR
 - **API**: Free Frankfurter API (no API key required, no rate limits)
 
+### Date Range Filtering
+- **Preset Periods**: 7D, 14D, 30D, 60D, 90D buttons for quick selection
+- **Custom Date Picker**: Two-month calendar view for arbitrary date ranges
+- **Dynamic Labels**: Period chip updates to show "Last X days" or custom date range
+- **Auto-Refresh**: All API endpoints automatically refetch when date range changes
+- **Default Period**: 60 days (Last 60 days)
+
 ### Navigation
 - Sticky header with branding and export
 - Breadcrumb navigation
@@ -154,9 +161,15 @@ Example response structure:
 - Responsive grid layouts
 
 ## Recent Changes
+- **2025-10-17**: ✅ Implemented functional date range filtering
+  - Added working preset periods (7D, 14D, 30D, 60D, 90D)
+  - Implemented Custom date picker with two-month calendar view
+  - Dynamic period labels update based on selection
+  - All API endpoints automatically refetch data when date range changes
+  - Verified with e2e tests: 30D shows €149k, 90D shows €159k
 - **2025-10-17**: ✅ Implemented EUR currency conversion using daily ECB exchange rates
   - Created exchange rate utility using Frankfurter API (free, no key required)
-  - Updated countries endpoint to convert all sales/costs to EUR
+  - Updated all API endpoints (KPIs, countries, chart-data) to convert to EUR
   - Handles future dates by using latest available rates
   - All dashboard metrics now displayed in EUR with proper aggregation
 - **2025-10-17**: ✅ Added "Bid Recommendation" column to search terms table
@@ -174,7 +187,6 @@ Example response structure:
 - 2025-10-11: Integrated Excel export for negatives
 
 ## Known Issues & Limitations
-- Date range picker currently shows static "Last 60 days"
 - Timezone normalization assumes UTC (monitor for drift if deploying outside UTC)
 - Some placement rows show "UNKNOWN" type (actual placement type may need mapping)
 - Table name typo: `s_brand_placment` (missing 'e' in placement) - actual database name
