@@ -12,36 +12,42 @@ import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { format, subDays, differenceInDays, parseISO } from "date-fns";
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
-  const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
+  const [dateRange, setDateRange] = useState<{ from: string; to: string } | null>(null);
 
   const { data: kpis, isLoading: kpisLoading, error: kpisError } = useQuery({
     queryKey: ['/api/kpis', dateRange],
     queryFn: async () => {
+      if (!dateRange) return null;
       const params = new URLSearchParams({ from: dateRange.from, to: dateRange.to });
       const response = await fetch(`/api/kpis?${params}`);
       const data = await response.json();
       if (data.error) throw new Error(data.error);
       return data;
     },
+    enabled: !!dateRange,
   });
 
   const { data: countries, isLoading: countriesLoading, error: countriesError } = useQuery({
     queryKey: ['/api/countries', dateRange],
     queryFn: async () => {
+      if (!dateRange) return null;
       const params = new URLSearchParams({ from: dateRange.from, to: dateRange.to });
       const response = await fetch(`/api/countries?${params}`);
       const data = await response.json();
       if (data.error) throw new Error(data.error);
       return data;
     },
+    enabled: !!dateRange,
   });
 
   const { data: chartData, isLoading: chartLoading, error: chartError } = useQuery({
     queryKey: ['/api/chart-data', dateRange],
     queryFn: async () => {
+      if (!dateRange) return null;
       const params = new URLSearchParams({ 
         from: dateRange.from, 
         to: dateRange.to,
@@ -52,11 +58,38 @@ export default function Dashboard() {
       if (data.error) throw new Error(data.error);
       return data;
     },
+    enabled: !!dateRange,
   });
 
   const handleExportNegatives = async () => {
+    if (!dateRange) return;
     const params = new URLSearchParams({ from: dateRange.from, to: dateRange.to });
     window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
+  };
+
+  const getPeriodLabel = () => {
+    if (!dateRange) return "Last 60 days";
+    
+    const days = differenceInDays(parseISO(dateRange.to), parseISO(dateRange.from)) + 1;
+    
+    // Check if it's a standard period
+    if (days === 7) return "Last 7 days";
+    if (days === 14) return "Last 14 days";
+    if (days === 30) return "Last 30 days";
+    if (days === 60) return "Last 60 days";
+    if (days === 90) return "Last 90 days";
+    
+    // Custom period
+    return `${format(parseISO(dateRange.from), 'MMM dd')} - ${format(parseISO(dateRange.to), 'MMM dd, yyyy')}`;
+  };
+
+  const handleClearFilters = () => {
+    const to = new Date();
+    const from = subDays(to, 59);
+    setDateRange({
+      from: format(from, 'yyyy-MM-dd'),
+      to: format(to, 'yyyy-MM-dd'),
+    });
   };
 
   const kpiCards = kpis ? [
@@ -94,12 +127,12 @@ export default function Dashboard() {
 
       <div className="sticky top-16 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center justify-between px-6 py-3">
-          <TimeRangePicker value={dateRange} onChange={setDateRange} />
+          <TimeRangePicker value={dateRange || undefined} onChange={setDateRange} />
           <div className="flex items-center gap-2">
-            <FilterChip label="Period" value="Last 60 days" />
+            <FilterChip label="Period" value={getPeriodLabel()} />
             <button 
               className="text-sm text-primary hover:underline" 
-              onClick={() => setDateRange({ from: "2025-09-22", to: "2025-11-22" })}
+              onClick={handleClearFilters}
               data-testid="button-clear-filters"
             >
               Clear all
