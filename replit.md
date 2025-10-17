@@ -1,12 +1,12 @@
 # Elan - Amazon PPC Analytics Portal
 
 ## Overview
-Internal analytics portal for Amazon PPC campaigns with bid recommendations targeting 20% ACOS.
+Internal analytics portal for Amazon PPC campaigns combining **brand** and **product** campaign data with bid recommendations targeting 20% ACOS.
 
 ## Tech Stack
 - **Frontend**: React 18, TypeScript, TailwindCSS, shadcn/ui, Recharts, Wouter
 - **Backend**: Express, Drizzle ORM, PostgreSQL (Supabase)
-- **Database**: Supabase PostgreSQL with tables `s_products_searchterms` and `sp_placement_daily_v2`
+- **Database**: Supabase PostgreSQL with 4 tables combining brand + product data sources
 
 ## Setup Instructions
 
@@ -36,8 +36,9 @@ The app will be available on port 5000.
 
 ### Core Features
 - **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Search Terms
+- **Unified Analytics**: Combines brand and product campaign data into single views
 - **Placement Analysis**: Campaign-level placement performance (TOS, ROS, PP, UNKNOWN)
-- **KPI Tracking**: Sales, ACOS, CPC, Cost, ROAS, Orders
+- **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders
 - **Performance Charts**: Weekly aggregated ACOS and sales trends
 - **Bid Recommendations**: 20% ACOS targeting with confidence levels
 - **Negative Keywords**: Auto-detection with ≥20 clicks, $0 sales
@@ -65,45 +66,68 @@ The app will be available on port 5000.
 
 ## Data Structure
 
-### Main Table
-`s_products_searchterms` (64 columns total):
+### Brand Tables (Clean Numeric Types)
 
-**Performance Metrics:**
-- Numeric: `impressions`, `clicks` (bigint), `cost`, `costPerClick`, `keywordBid` (double precision)
-- TEXT (requires casting): `sales7d`, `sales14d`, `purchases7d`, `purchases14d`, `acosClicks7d`, `roasClicks7d`
+**1. `s_brand_search_terms` (8,228 rows)**
+- Performance Metrics (numeric types): `clicks`, `cost`, `sales`, `purchases`, `keywordBid`
+- Identifiers: `campaignId`, `adGroupId`, `keywordId` (bigint)
+- Metadata: `searchTerm`, `keywordText`, `matchType`, `campaignBudgetCurrencyCode`, `country`, `date`
 
-**Identifiers:**
-- `campaignId`, `adGroupId`, `keywordId` (bigint)
-- `searchTerm`, `targeting`, `keyword` (text)
+**2. `s_brand_placment` (typo in actual table name - 1,394 rows)**
+- Performance Metrics (numeric types): `clicks`, `cost`, `sales`, `purchases`
+- Identifiers: `campaignId`, `campaignName`
+- Metadata: `campaignPlacement` (TOS/ROS/PP/UNKNOWN), `country`, `date`
 
-**Metadata:**
-- `country`, `campaignName`, `adGroupName`, `matchType`, `keywordType` (text)
-- `campaignBudgetCurrencyCode` (EUR, GBP, SEK, PLN)
-- `date` (text format: YYYY-MM-DD)
+### Product Tables (TEXT-based Metrics)
 
-**Important Note:** Sales and purchases columns are stored as TEXT and must be cast to numeric for aggregation:
+**3. `s_products_search_terms` (47,211 rows)**
+- Performance Metrics (TEXT - requires casting):
+  - `clicks`, `cost` (can be used directly as numbers)
+  - `sales7d`, `sales14d`, `purchases7d`, `purchases14d` (TEXT - must cast)
+- Identifiers: `campaignId`, `adGroupId`, `keywordId` (bigint)
+- Metadata: `searchTerm`, `keyword`, `matchType`, `campaignBudgetCurrencyCode`, `country`, `date`
+
+**Important Note:** Product table sales/purchases are TEXT and must be cast:
 ```sql
 COALESCE(SUM(NULLIF(sales7d, '')::numeric), 0)
 ```
 
-### Placements Table
+**4. `s_products_placement` (placeholder - use sp_placement_daily_v2)**
+
+### Legacy Placements Table
 `sp_placement_daily_v2` (47 columns, 30,231 rows):
+- All metrics are TEXT and require casting
+- Contains historical product placement data
 
-**Performance Metrics (all TEXT - require casting):**
-- `impressions`, `clicks`, `cost`, `spend`, `costPerClick`, `clickThroughRate`
-- Sales: `sales1d`, `sales7d`, `sales14d`, `sales30d`
-- Purchases: `purchases1d`, `purchases7d`, `purchases14d`, `purchases30d`
-- Units sold: `unitsSoldClicks1d/7d/14d/30d`
-- ACOS/ROAS: `acosClicks14d`, `roasClicks14d`
+## API Architecture
 
-**Identifiers:**
-- `campaignId` (bigint), `campaignName` (text)
-- `campaignPlacement` (text) - TOS/ROS/PP/UNKNOWN
-- `country` (text), `date` (text)
+### UNION Query Strategy
+All API endpoints combine brand + product data using Map-based aggregation:
 
-**Important Note:** All metrics are TEXT and must be cast using:
-```sql
-COALESCE(SUM(NULLIF(column, '')::numeric), 0)
+1. Query brand table (clean numeric types)
+2. Query product table (cast TEXT to numeric)
+3. Aggregate by key (country/campaign/ad group/search term)
+4. Sum clicks, cost, sales, orders across both sources
+
+### Critical Fields in API Responses
+- **Always include calculated fields**: `cpc`, `cvr`, `acos`
+- **Frontend safety**: All numeric renders use null guards: `(val ?? 0).toFixed(2)`
+
+Example response structure:
+```typescript
+{
+  searchTerm: string,
+  clicks: number,
+  cost: number,
+  sales: number,
+  orders: number,
+  acos: number,
+  cpc: number,  // cost / clicks
+  cvr: number,  // (orders / clicks) * 100
+  currentBid: number,
+  recommendedBid: number,
+  currency: string
+}
 ```
 
 ## Design Guidelines
@@ -117,13 +141,13 @@ COALESCE(SUM(NULLIF(column, '')::numeric), 0)
 - Responsive grid layouts
 
 ## Recent Changes
+- **2025-10-17**: ✅ Fixed CPC/CVR rendering bug - added calculated fields to API response
+- **2025-10-17**: ✅ Added null guards to all toFixed() calls in frontend
+- **2025-10-17**: ✅ E2E tests passing - €157k sales, 22% ACOS (combined brand + product)
+- **2025-10-17**: ✅ Migrated from 2-table to 4-table structure combining brand + product
+- **2025-10-17**: ✅ Rewrote all API routes using UNION queries for combined data
 - 2025-10-14: ✅ Integrated sp_placement_daily_v2 table (30k+ rows)
-- 2025-10-14: ✅ Updated placements endpoint with TEXT column casting
-- 2025-10-14: ✅ E2E tests passed - Placements tab working with real data
 - 2025-10-14: ✅ Successfully connected to Supabase database using pooler
-- 2025-10-14: ✅ Updated schema to match actual table structure (TEXT columns for sales/purchases)
-- 2025-10-14: ✅ Fixed all API routes to handle TEXT to numeric conversions
-- 2025-10-14: ✅ Verified full drilldown flow works with real data (10 countries, €95k sales)
 - 2025-10-11: Implemented bid recommendation engine
 - 2025-10-11: Integrated Excel export for negatives
 
@@ -131,8 +155,15 @@ COALESCE(SUM(NULLIF(column, '')::numeric), 0)
 - Date range picker currently shows static "Last 60 days"
 - Timezone normalization assumes UTC (monitor for drift if deploying outside UTC)
 - Some placement rows show "UNKNOWN" type (actual placement type may need mapping)
+- Table name typo: `s_brand_placment` (missing 'e' in placement) - actual database name
 
 ## User Preferences
 - Prefer data-first over decorative UI
 - M19.com-inspired clean design
 - Professional color scheme
+
+## Data Volume Summary
+- **Brand Search Terms**: 8,228 rows
+- **Brand Placements**: 1,394 rows
+- **Product Search Terms**: 47,211 rows
+- **Total Combined**: €167,833 sales across 10 countries
