@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { db } from "./db";
 import { brandSearchTerms, brandPlacement, productSearchTerms, productPlacement, recommendations } from "@shared/schema";
 import { sql, eq, and, gte, lte, desc, asc } from "drizzle-orm";
-import { calculateACOS, calculateCPC, calculateCVR, calculateROAS } from "./utils/calculations";
+import { calculateACOS, calculateCPC, calculateCVR, calculateROAS, getConfidenceLevel } from "./utils/calculations";
 import { generateBidRecommendation, detectNegativeKeywords } from "./utils/recommendations";
 import * as XLSX from 'xlsx';
 
@@ -766,6 +766,201 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Export error:', error);
       res.status(500).json({ error: 'Failed to export negatives' });
+    }
+  });
+
+  // Generate bid recommendations endpoint
+  app.post("/api/recommendations/generate", async (req, res) => {
+    try {
+      const { scope, scopeId, from, to, targetAcos = 20 } = req.body;
+
+      if (!scopeId) {
+        return res.status(400).json({ error: 'Missing required parameters' });
+      }
+
+      // Fetch search terms data for the scope (ad group)
+      const brandConditions = [];
+      const productConditions = [];
+      
+      if (scopeId) {
+        brandConditions.push(sql`${brandSearchTerms.adGroupId}::text = ${scopeId}`);
+        productConditions.push(sql`${productSearchTerms.adGroupId}::text = ${scopeId}`);
+      }
+      if (from) {
+        brandConditions.push(gte(brandSearchTerms.date, from as string));
+        productConditions.push(gte(productSearchTerms.date, from as string));
+      }
+      if (to) {
+        brandConditions.push(lte(brandSearchTerms.date, to as string));
+        productConditions.push(lte(productSearchTerms.date, to as string));
+      }
+
+      // Fetch brand search terms
+      const brandResults = await db
+        .select({
+          searchTerm: brandSearchTerms.searchTerm,
+          keywordBid: sql<number>`MAX(${brandSearchTerms.keywordBid})`,
+          clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+          orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+        })
+        .from(brandSearchTerms)
+        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
+        .groupBy(brandSearchTerms.searchTerm);
+
+      // Fetch product search terms
+      const productResults = await db
+        .select({
+          searchTerm: productSearchTerms.searchTerm,
+          keywordBid: sql<number>`MAX(${productSearchTerms.keywordBid})`,
+          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+        })
+        .from(productSearchTerms)
+        .where(productConditions.length > 0 ? and(...productConditions) : undefined)
+        .groupBy(productSearchTerms.searchTerm);
+
+      // Combine brand + product data
+      const searchTermMap = new Map();
+      
+      brandResults.forEach(row => {
+        if (row.searchTerm) {
+          searchTermMap.set(row.searchTerm, {
+            searchTerm: row.searchTerm,
+            keywordBid: Number(row.keywordBid || 0),
+            clicks: Number(row.clicks),
+            cost: Number(row.cost),
+            sales: Number(row.sales),
+            orders: Number(row.orders),
+          });
+        }
+      });
+
+      productResults.forEach(row => {
+        if (row.searchTerm) {
+          const existing = searchTermMap.get(row.searchTerm);
+          if (existing) {
+            existing.clicks += Number(row.clicks);
+            existing.cost += Number(row.cost);
+            existing.sales += Number(row.sales);
+            existing.orders += Number(row.orders);
+          } else {
+            searchTermMap.set(row.searchTerm, {
+              searchTerm: row.searchTerm,
+              keywordBid: Number(row.keywordBid || 0),
+              clicks: Number(row.clicks),
+              cost: Number(row.cost),
+              sales: Number(row.sales),
+              orders: Number(row.orders),
+            });
+          }
+        }
+      });
+
+      const combinedTerms = Array.from(searchTermMap.values());
+
+      // Calculate ad group median CPC for context
+      const cpcs = combinedTerms
+        .filter(t => t.clicks > 0)
+        .map(t => t.cost / t.clicks)
+        .sort((a, b) => a - b);
+      const adGroupMedianCPC = cpcs.length > 0 ? cpcs[Math.floor(cpcs.length / 2)] : 1.0;
+
+      // Generate recommendations based on PPC AI Prompt logic
+      const recommendations = combinedTerms
+        .map(term => {
+          const cpc = term.clicks > 0 ? term.cost / term.clicks : 0;
+          const acos = term.sales > 0 ? (term.cost / term.sales) * 100 : 0;
+          const cvr = term.clicks > 0 ? (term.orders / term.clicks) * 100 : 0;
+          const confidence = getConfidenceLevel(term.clicks);
+
+          // Skip if insufficient data (less than 30 clicks = Low confidence)
+          if (term.clicks < 30) {
+            return null;
+          }
+
+          const baseBid = term.keywordBid || cpc || adGroupMedianCPC;
+          let proposedBid = baseBid;
+          let rationale = '';
+
+          // PPC AI Prompt Logic:
+          // 1) No sales - reduce bid
+          if (term.sales === 0 && term.clicks >= 30) {
+            const reduction = term.clicks >= 100 ? 0.70 : 0.85; // -30% or -15%
+            proposedBid = baseBid * reduction;
+            rationale = `No sales with ${term.clicks} clicks. Reducing bid ${reduction === 0.70 ? '30%' : '15%'} to minimize waste.`;
+          }
+          // 2) ACOS below target range (< 16% when target is 20%)
+          else if (acos > 0 && acos <= targetAcos * 0.8 && term.clicks >= 30) {
+            const increase = term.clicks >= 300 ? 1.20 : term.clicks >= 100 ? 1.15 : 1.10;
+            proposedBid = baseBid * increase;
+            rationale = `ACOS ${acos.toFixed(1)}% well below target ${targetAcos}%. Increasing bid to capture more profitable volume. Confidence: ${confidence.label}`;
+          }
+          // 3) Standard formula: current bid / current ACOS * target ACOS = new bid
+          else if (term.sales > 0 && acos > 0) {
+            proposedBid = baseBid * (targetAcos / acos);
+            
+            if (acos > targetAcos * 1.1) {
+              rationale = `ACOS ${acos.toFixed(1)}% exceeds target ${targetAcos}%. Applying formula: ${baseBid.toFixed(2)} × (${targetAcos} / ${acos.toFixed(1)}) = ${proposedBid.toFixed(2)}. CVR: ${cvr.toFixed(1)}%`;
+            } else if (acos < targetAcos * 0.9) {
+              rationale = `ACOS ${acos.toFixed(1)}% below target ${targetAcos}%. Optimizing bid for growth. CVR: ${cvr.toFixed(1)}%`;
+            } else {
+              rationale = `ACOS ${acos.toFixed(1)}% near target ${targetAcos}%. Fine-tuning bid. CVR: ${cvr.toFixed(1)}%`;
+            }
+          } else {
+            return null;
+          }
+
+          // Apply safeguards: 20% to 150% of base bid (per PPC AI guidelines)
+          const minBid = baseBid * 0.20;
+          const maxBid = baseBid * 1.50;
+          proposedBid = Math.max(minBid, Math.min(maxBid, proposedBid));
+          proposedBid = Math.round(proposedBid * 100) / 100;
+
+          const delta = ((proposedBid - baseBid) / baseBid) * 100;
+
+          return {
+            searchTerm: term.searchTerm,
+            currentBid: baseBid,
+            proposedBid,
+            clicks: term.clicks,
+            cost: term.cost,
+            sales: term.sales,
+            orders: term.orders,
+            acos: acos,
+            targetAcos: targetAcos,
+            cvr: cvr,
+            cpc: cpc,
+            delta: delta,
+            confidence: confidence.label,
+            rationale,
+          };
+        })
+        .filter(rec => rec !== null)
+        .sort((a, b) => {
+          // Sort by confidence level first, then by clicks
+          const confidenceOrder = { 'Extreme': 0, 'High': 1, 'Good': 2, 'OK': 3, 'Low': 4 };
+          const confDiff = confidenceOrder[a!.confidence as keyof typeof confidenceOrder] - confidenceOrder[b!.confidence as keyof typeof confidenceOrder];
+          if (confDiff !== 0) return confDiff;
+          return b!.clicks - a!.clicks;
+        });
+
+      res.json({ 
+        recommendations,
+        summary: {
+          totalAnalyzed: combinedTerms.length,
+          recommendationsGenerated: recommendations.length,
+          targetAcos: targetAcos,
+          adGroupMedianCPC: adGroupMedianCPC.toFixed(2),
+        }
+      });
+
+    } catch (error) {
+      console.error('Recommendations generation error:', error);
+      res.status(500).json({ error: 'Failed to generate recommendations' });
     }
   });
 
