@@ -1,11 +1,77 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, numeric, timestamp, bigint, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, timestamp, bigint, doublePrecision, date as pgDate, varchar, jsonb, char } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Match the actual s_products_searchterms table structure
-export const searchTermsDaily = pgTable('s_products_searchterms', {
+// Brand Search Terms table - clean numeric types
+export const brandSearchTerms = pgTable('s_brand_search_terms', {
   id: bigint("id", { mode: "number" }).primaryKey(),
+  date: pgDate("date"),
+  searchTerm: text("search_term"),
+  impressions: bigint("impressions", { mode: "number" }),
+  clicks: bigint("clicks", { mode: "number" }),
+  cost: numeric("cost"),
+  purchases: bigint("purchases", { mode: "number" }),
+  sales: numeric("sales"),
+  unitsSold: bigint("units_sold", { mode: "number" }),
+  purchasesClicks: bigint("purchases_clicks", { mode: "number" }),
+  salesClicks: numeric("sales_clicks"),
+  
+  // Keyword info
+  keywordId: bigint("keyword_id", { mode: "number" }),
+  keywordText: text("keyword_text"),
+  keywordType: text("keyword_type"),
+  keywordBid: numeric("keyword_bid"),
+  adKeywordStatus: text("ad_keyword_status"),
+  matchType: text("match_type"),
+  
+  // Campaign info
+  campaignId: bigint("campaign_id", { mode: "number" }),
+  campaignName: text("campaign_name"),
+  campaignStatus: text("campaign_status"),
+  campaignBudgetType: text("campaign_budget_type"),
+  campaignBudgetAmount: numeric("campaign_budget_amount"),
+  campaignBudgetCurrencyCode: char("campaign_budget_currency_code", { length: 3 }),
+  
+  // Ad group info
+  adGroupId: bigint("ad_group_id", { mode: "number" }),
+  adGroupName: text("ad_group_name"),
+  
+  // Metadata
+  rawPayload: jsonb("raw_payload"),
+  ingestedAt: timestamp("ingested_at"),
+  country: text("country"),
+});
+
+// Brand Placement table - clean numeric types
+export const brandPlacement = pgTable('s_brand_placment', {
+  date: pgDate("date"),
+  campaignId: bigint("campaignId", { mode: "number" }),
+  campaignName: text("campaignName"),
+  campaignStatus: text("campaignStatus"),
+  costType: text("costType"),
+  impressions: bigint("impressions", { mode: "number" }),
+  viewableImpressions: bigint("viewableImpressions", { mode: "number" }),
+  viewabilityRate: numeric("viewabilityRate"),
+  clicks: bigint("clicks", { mode: "number" }),
+  cost: numeric("cost"),
+  purchases: bigint("purchases", { mode: "number" }),
+  sales: numeric("sales"),
+  unitsSold: bigint("unitsSold", { mode: "number" }),
+  newToBrandPurchases: bigint("newToBrandPurchases", { mode: "number" }),
+  newToBrandSales: numeric("newToBrandSales"),
+  newToBrandUnitsSold: bigint("newToBrandUnitsSold", { mode: "number" }),
+  brandedSearches: bigint("brandedSearches", { mode: "number" }),
+  insertedAt: timestamp("insertedAt"),
+  updatedAt: timestamp("updatedAt"),
+  id: bigint("id", { mode: "number" }).primaryKey(),
+  country: text("country"),
+});
+
+// Product Search Terms table - TEXT columns (legacy structure)
+export const productSearchTerms = pgTable('s_products_search_terms', {
+  id: bigint("id", { mode: "number" }).primaryKey(),
+  
   // Performance metrics (numeric types)
   impressions: bigint("impressions", { mode: "number" }),
   clicks: bigint("clicks", { mode: "number" }),
@@ -14,7 +80,7 @@ export const searchTermsDaily = pgTable('s_products_searchterms', {
   cost: doublePrecision("cost"),
   spend: doublePrecision("spend"),
   
-  // Purchase metrics (TEXT in database - need casting for aggregation)
+  // Purchase metrics (TEXT - need casting)
   purchases1d: text("purchases1d"),
   purchases7d: text("purchases7d"),
   purchases14d: text("purchases14d"),
@@ -30,7 +96,7 @@ export const searchTermsDaily = pgTable('s_products_searchterms', {
   unitsSoldClicks14d: text("unitsSoldClicks14d"),
   unitsSoldClicks30d: text("unitsSoldClicks30d"),
   
-  // Sales metrics (TEXT in database)
+  // Sales metrics (TEXT)
   sales1d: text("sales1d"),
   sales7d: text("sales7d"),
   sales14d: text("sales14d"),
@@ -60,7 +126,7 @@ export const searchTermsDaily = pgTable('s_products_searchterms', {
   unitsSoldOtherSku14d: text("unitsSoldOtherSku14d"),
   purchaseClickRate14d: text("purchaseClickRate14d"),
   
-  // ACOS and ROAS (TEXT in database)
+  // ACOS and ROAS (TEXT)
   acosClicks7d: text("acosClicks7d"),
   acosClicks14d: text("acosClicks14d"),
   roasClicks7d: text("roasClicks7d"),
@@ -72,7 +138,7 @@ export const searchTermsDaily = pgTable('s_products_searchterms', {
   
   // Campaign metadata
   campaignBudgetCurrencyCode: text("campaignBudgetCurrencyCode"),
-  date: text("date"), // TEXT format date
+  date: text("date"),
   portfolioId: bigint("portfolioId", { mode: "number" }),
   searchTerm: text("searchTerm"),
   campaignName: text("campaignName"),
@@ -95,13 +161,14 @@ export const searchTermsDaily = pgTable('s_products_searchterms', {
   country: text("country"),
 });
 
-export const placementsDaily = pgTable("sp_placement_daily_v2", {
+// Product Placement table - TEXT columns (legacy structure)
+export const productPlacement = pgTable("s_products_placement", {
   id: bigint("id", { mode: "number" }).primaryKey(),
   date: text("date"),
   retailer: text("retailer"),
   campaignPlacement: text("campaignPlacement"),
   
-  // All metrics are TEXT - require casting for aggregation
+  // All metrics are TEXT - require casting
   impressions: text("impressions"),
   clicks: text("clicks"),
   cost: text("cost"),
@@ -179,5 +246,7 @@ export const insertRecommendationSchema = createInsertSchema(recommendations).om
 
 export type InsertRecommendation = z.infer<typeof insertRecommendationSchema>;
 export type Recommendation = typeof recommendations.$inferSelect;
-export type SearchTermDaily = typeof searchTermsDaily.$inferSelect;
-export type PlacementDaily = typeof placementsDaily.$inferSelect;
+export type BrandSearchTerm = typeof brandSearchTerms.$inferSelect;
+export type BrandPlacement = typeof brandPlacement.$inferSelect;
+export type ProductSearchTerm = typeof productSearchTerms.$inferSelect;
+export type ProductPlacement = typeof productPlacement.$inferSelect;
