@@ -473,19 +473,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .map(row => {
           const acos = calculateACOS(row.cost, row.sales);
           const cpc = calculateCPC(row.cost, row.clicks);
+          const targetAcos = 20;
           
-          const recommendation = generateBidRecommendation(
-            {
-              searchTerm: row.searchTerm || '',
-              clicks: row.clicks,
-              cost: row.cost,
-              sales: row.sales,
-              currentBid: row.keywordBid,
-              cpc,
-            },
-            20, // target 20% ACOS
-            cpc // ad group median CPC
-          );
+          // Calculate recommendation for ALL terms (not just 30+ clicks)
+          const baseBid = row.keywordBid || cpc || 1.0;
+          let recommendedBid = baseBid;
+          let confidence = getConfidenceLevel(row.clicks).label;
+          
+          // Apply PPC AI logic for all terms with any data
+          if (row.clicks > 0) {
+            if (row.sales === 0 && row.clicks >= 20) {
+              // No sales with significant clicks - reduce bid
+              recommendedBid = baseBid * 0.85; // -15%
+            } else if (acos > 0 && acos <= targetAcos * 0.8) {
+              // ACOS well below target - increase bid
+              const increase = row.clicks >= 100 ? 1.15 : 1.10;
+              recommendedBid = baseBid * increase;
+            } else if (acos > 0) {
+              // Standard formula: current bid × (target ACOS / current ACOS)
+              recommendedBid = baseBid * (targetAcos / acos);
+            }
+            
+            // Apply safeguards: 20% to 150% of base bid
+            const minBid = baseBid * 0.20;
+            const maxBid = baseBid * 1.50;
+            recommendedBid = Math.max(minBid, Math.min(maxBid, recommendedBid));
+            recommendedBid = Math.round(recommendedBid * 100) / 100;
+          }
+          
+          const bidChange = baseBid > 0 ? ((recommendedBid - baseBid) / baseBid) * 100 : 0;
 
           return {
             searchTerm: row.searchTerm,
@@ -496,12 +512,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sales: row.sales,
             orders: row.orders,
             acos,
-            cpc, // Add CPC
-            cvr: row.clicks > 0 ? (row.orders / row.clicks) * 100 : 0, // Add CVR
+            cpc,
+            cvr: row.clicks > 0 ? (row.orders / row.clicks) * 100 : 0,
             currentBid: row.keywordBid,
-            recommendedBid: recommendation?.proposedBid || row.keywordBid,
-            bidChange: recommendation?.delta || 0,
-            confidence: recommendation?.confidence || 'Low',
+            recommendedBid: recommendedBid,
+            bidChange: bidChange,
+            confidence: confidence,
             currency: row.currency,
           };
         })

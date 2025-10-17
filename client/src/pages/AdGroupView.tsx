@@ -202,6 +202,7 @@ export default function AdGroupView() {
                     { key: "cvr", label: "CVR", align: "right", sortable: true, render: (val) => `${(val ?? 0).toFixed(1)}%` },
                     { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val ?? 0} /> },
                     { key: "currentBid", label: "Current Bid", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
+                    { key: "recommendedBid", label: "Bid Recommendation", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
                   ]}
                   data={searchTerms}
                 />
