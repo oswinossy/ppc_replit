@@ -195,13 +195,13 @@ export default function AdGroupView() {
                     { key: "searchTerm", label: "Search Term", sortable: true },
                     { key: "matchType", label: "Match Type", sortable: true, render: (val) => <Badge variant="outline">{val}</Badge> },
                     { key: "clicks", label: "Clicks", align: "right", sortable: true },
-                    { key: "cost", label: "Cost (€)", align: "right", sortable: true, render: (val) => val.toFixed(2) },
-                    { key: "sales", label: "Sales (€)", align: "right", sortable: true, render: (val) => val.toFixed(2) },
+                    { key: "cost", label: "Cost (€)", align: "right", sortable: true, render: (val) => (val ?? 0).toFixed(2) },
+                    { key: "sales", label: "Sales (€)", align: "right", sortable: true, render: (val) => (val ?? 0).toFixed(2) },
                     { key: "orders", label: "Orders", align: "right", sortable: true },
-                    { key: "cpc", label: "CPC", align: "right", sortable: true, render: (val) => `€${val.toFixed(2)}` },
-                    { key: "cvr", label: "CVR", align: "right", sortable: true, render: (val) => `${val.toFixed(1)}%` },
-                    { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
-                    { key: "currentBid", label: "Current Bid", align: "right", sortable: true, render: (val) => `€${val.toFixed(2)}` },
+                    { key: "cpc", label: "CPC", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
+                    { key: "cvr", label: "CVR", align: "right", sortable: true, render: (val) => `${(val ?? 0).toFixed(1)}%` },
+                    { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val ?? 0} /> },
+                    { key: "currentBid", label: "Current Bid", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
                   ]}
                   data={searchTerms}
                 />

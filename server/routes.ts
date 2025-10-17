@@ -472,12 +472,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const searchTerms = Array.from(searchTermMap.values())
         .map(row => {
           const acos = calculateACOS(row.cost, row.sales);
+          const cpc = calculateCPC(row.cost, row.clicks);
+          
           const recommendation = generateBidRecommendation(
-            row.clicks,
-            row.cost,
-            row.sales,
-            row.keywordBid,
-            0.20 // target 20% ACOS
+            {
+              searchTerm: row.searchTerm || '',
+              clicks: row.clicks,
+              cost: row.cost,
+              sales: row.sales,
+              currentBid: row.keywordBid,
+              cpc,
+            },
+            20, // target 20% ACOS
+            cpc // ad group median CPC
           );
 
           return {
@@ -489,10 +496,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sales: row.sales,
             orders: row.orders,
             acos,
+            cpc, // Add CPC
+            cvr: row.clicks > 0 ? (row.orders / row.clicks) * 100 : 0, // Add CVR
             currentBid: row.keywordBid,
-            recommendedBid: recommendation.recommendedBid,
-            bidChange: recommendation.bidChange,
-            confidence: recommendation.confidence,
+            recommendedBid: recommendation?.proposedBid || row.keywordBid,
+            bidChange: recommendation?.delta || 0,
+            confidence: recommendation?.confidence || 'Low',
             currency: row.currency,
           };
         })
@@ -687,6 +696,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
           adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
         })
         .from(productSearchTerms)
@@ -696,10 +706,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const negatives = detectNegativeKeywords(
         results.map(row => ({
           searchTerm: row.searchTerm || '',
-          campaignName: row.campaignName,
-          adGroupName: row.adGroupName,
           clicks: Number(row.clicks),
+          cost: Number(row.cost),
           sales: Number(row.sales),
+          currentBid: null,
+          cpc: Number(row.clicks) > 0 ? Number(row.cost) / Number(row.clicks) : 0,
         }))
       );
 
@@ -725,6 +736,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
           adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
         })
         .from(productSearchTerms)
@@ -734,10 +746,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const negatives = detectNegativeKeywords(
         results.map(row => ({
           searchTerm: row.searchTerm || '',
-          campaignName: row.campaignName,
-          adGroupName: row.adGroupName,
           clicks: Number(row.clicks),
+          cost: Number(row.cost),
           sales: Number(row.sales),
+          currentBid: null,
+          cpc: Number(row.clicks) > 0 ? Number(row.cost) / Number(row.clicks) : 0,
         }))
       );
 
