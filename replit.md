@@ -1,12 +1,12 @@
 # Elan - Amazon PPC Analytics Portal
 
 ## Overview
-Internal analytics portal for Amazon PPC campaigns combining **brand** and **product** campaign data with bid recommendations targeting 20% ACOS.
+Internal analytics portal for Amazon PPC campaigns combining **Sponsored Products**, **Sponsored Brands**, and **Display** campaign data with bid recommendations targeting 20% ACOS.
 
 ## Tech Stack
 - **Frontend**: React 18, TypeScript, TailwindCSS, shadcn/ui, Recharts, Wouter
 - **Backend**: Express, Drizzle ORM, PostgreSQL (Supabase)
-- **Database**: Supabase PostgreSQL with 4 tables combining brand + product data sources
+- **Database**: Supabase PostgreSQL with 6 tables across 3 campaign types
 
 ## Setup Instructions
 
@@ -36,7 +36,7 @@ The app will be available on port 5000.
 
 ### Core Features
 - **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Search Terms
-- **Unified Analytics**: Combines brand and product campaign data into single views
+- **Campaign Type Segmentation**: 6-view system - 3 campaign types (Sponsored Products, Sponsored Brands, Display) × 2 views (Search Terms, Placements)
 - **EUR Currency Conversion**: All metrics displayed in EUR using daily ECB exchange rates
 - **Placement Analysis**: Campaign-level placement performance (TOS, ROS, PP, UNKNOWN)
 - **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders
@@ -44,6 +44,25 @@ The app will be available on port 5000.
 - **Bid Recommendations**: 20% ACOS targeting with confidence levels (shown for ALL search terms)
 - **Negative Keywords**: Auto-detection with ≥20 clicks, $0 sales
 - **Excel Export**: Download negative keywords for bulk upload
+
+### Campaign Type Segmentation (6-View System)
+The Ad Group view provides a campaign type selector allowing users to view data segmented by Amazon campaign type:
+
+**3 Campaign Types:**
+1. **Sponsored Products** (default): Search ads targeting products
+2. **Sponsored Brands**: Brand awareness campaigns
+3. **Display**: Display advertising campaigns
+
+**2 Views per Campaign Type:**
+1. **Search Terms**: Keyword/targeting performance with bid recommendations
+2. **Placements**: Placement type performance (TOS, ROS, PP, etc.)
+
+**Implementation Details:**
+- Campaign type selector updates URL with `?campaignType=products|brands|display` parameter
+- View toggle switches between Search Terms and Placements
+- All API endpoints (`/api/kpis`, `/api/search-terms`, `/api/placements`) accept `campaignType` parameter
+- **Critical**: Products campaign type filters by `adGroupId`; Brands and Display do NOT use adGroupId filter (those tables don't have this field)
+- Display campaigns use `targetingText` instead of `searchTerm` and `matchedTargetAsin` instead of `keyword`
 
 ### Recommendation Engine
 - **Confidence Levels**:
@@ -114,6 +133,18 @@ COALESCE(SUM(NULLIF(sales7d, '')::numeric), 0)
 
 **4. `s_products_placement` (placeholder - use sp_placement_daily_v2)**
 
+### Display Tables
+
+**5. `s_display_matched_target` (Display Search Terms equivalent)**
+- Performance Metrics (numeric types): `clicks`, `cost`, `sales`, `purchases`
+- Identifiers: `campaignId`, `adGroupId`, `keywordId` (bigint)
+- Metadata: `targetingText` (equivalent to searchTerm), `matchedTargetAsin`, `campaignBudgetCurrencyCode`, `country`, `date`
+
+**6. `s_display_targeting` (Display Placements equivalent)**
+- Performance Metrics (numeric types): `clicks`, `cost`, `sales`, `purchases`
+- Identifiers: `campaignId`, `adGroupId`
+- Metadata: `targetingText`, `targetingExpression`, `campaignBudgetCurrencyCode`, `country`, `date`
+
 ### Legacy Placements Table
 `sp_placement_daily_v2` (47 columns, 30,231 rows):
 - All metrics are TEXT and require casting
@@ -121,13 +152,16 @@ COALESCE(SUM(NULLIF(sales7d, '')::numeric), 0)
 
 ## API Architecture
 
-### UNION Query Strategy
-All API endpoints combine brand + product data using Map-based aggregation:
+### Campaign Type Filtering Strategy
+All API endpoints filter by `campaignType` parameter (defaults to 'products'):
 
-1. Query brand table (clean numeric types)
-2. Query product table (cast TEXT to numeric)
-3. Aggregate by key (country/campaign/ad group/search term)
-4. Sum clicks, cost, sales, orders across both sources
+**Filtering Logic:**
+- **Sponsored Products**: Queries `s_products_search_terms` and `s_products_placement` tables, filters by `adGroupId`
+- **Sponsored Brands**: Queries `s_brand_search_terms` and `s_brand_placment` tables, NO adGroupId filter (brand tables don't use this field)
+- **Display**: Queries `s_display_matched_target` and `s_display_targeting` tables, NO adGroupId filter (display tables don't use this field)
+
+**Important Implementation Note:**
+The `adGroupId` filter is ONLY applied to Sponsored Products queries. Brands and Display campaign types ignore the adGroupId parameter to avoid filtering out all rows (those tables don't have an adGroupId field that matches the products adGroupId structure).
 
 ### Critical Fields in API Responses
 - **Always include calculated fields**: `cpc`, `cvr`, `acos`
@@ -161,6 +195,14 @@ Example response structure:
 - Responsive grid layouts
 
 ## Recent Changes
+- **2025-10-26**: ✅ Implemented 6-view campaign type segmentation system
+  - Added Display table schemas (s_display_matched_target, s_display_targeting) to shared/schema.ts
+  - Updated AdGroupView.tsx with campaign type selector (Sponsored Products | Sponsored Brands | Display)
+  - Refactored 3 core API endpoints (/api/kpis, /api/search-terms, /api/placements) to filter by campaignType parameter
+  - Fixed adGroupId filtering: Only applies to Products, removed from Brands/Display queries (those tables don't have this field)
+  - Fixed numeric type conversion to prevent .toFixed() errors
+  - Added € currency symbol to all Cost and Sales columns in frontend tables
+  - E2E tested all 6 views (3 campaign types × 2 views) successfully
 - **2025-10-17**: ✅ Implemented functional date range filtering
   - Added working preset periods (7D, 14D, 30D, 60D, 90D)
   - Implemented Custom date picker with two-month calendar view
