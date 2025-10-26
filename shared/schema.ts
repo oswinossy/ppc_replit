@@ -229,6 +229,201 @@ export const productPlacement = pgTable("s_products_placement", {
   upload_id: text("upload_id"),
 });
 
+// Display Matched Target table - clean numeric types (equivalent to "Search Terms" for Display)
+export const displayMatchedTarget = pgTable('s_display_matched_target', {
+  id: bigint("id", { mode: "number" }).primaryKey(),
+  date: pgDate("date"),
+  country: text("country"),
+  
+  // Campaign info
+  campaignId: bigint("campaignId", { mode: "number" }),
+  campaignName: text("campaignName"),
+  
+  // Ad group info
+  adGroupId: bigint("adGroupId", { mode: "number" }),
+  adGroupName: text("adGroupName"),
+  
+  // Targeting info (like search terms)
+  targetingId: bigint("targetingId", { mode: "number" }),
+  targetingText: text("targetingText"),
+  targetingExpression: text("targetingExpression"),
+  matchedTargetAsin: text("matchedTargetAsin"),
+  
+  // Currency
+  campaignBudgetCurrencyCode: text("campaignBudgetCurrencyCode"),
+  
+  // Performance metrics - clean numeric types
+  cost: numeric("cost"),
+  sales: numeric("sales"),
+  salesClicks: numeric("salesClicks"),
+  salesPromotedClicks: numeric("salesPromotedClicks"),
+  newToBrandSales: numeric("newToBrandSales"),
+  newToBrandSalesClicks: numeric("newToBrandSalesClicks"),
+  eCPBrandSearch: numeric("eCPBrandSearch"),
+  eCPAddToCart: numeric("eCPAddToCart"),
+  
+  impressions: bigint("impressions", { mode: "number" }),
+  impressionsViews: bigint("impressionsViews", { mode: "number" }),
+  clicks: bigint("clicks", { mode: "number" }),
+  purchases: bigint("purchases", { mode: "number" }),
+  purchasesClicks: bigint("purchasesClicks", { mode: "number" }),
+  purchasesPromotedClicks: bigint("purchasesPromotedClicks", { mode: "number" }),
+  detailPageViews: bigint("detailPageViews", { mode: "number" }),
+  detailPageViewsClicks: bigint("detailPageViewsClicks", { mode: "number" }),
+  unitsSold: bigint("unitsSold", { mode: "number" }),
+  unitsSoldClicks: bigint("unitsSoldClicks", { mode: "number" }),
+  
+  // New to brand metrics
+  newToBrandPurchases: bigint("newToBrandPurchases", { mode: "number" }),
+  newToBrandPurchasesClicks: bigint("newToBrandPurchasesClicks", { mode: "number" }),
+  newToBrandUnitsSold: bigint("newToBrandUnitsSold", { mode: "number" }),
+  newToBrandUnitsSoldClicks: bigint("newToBrandUnitsSoldClicks", { mode: "number" }),
+  
+  // Branded searches
+  brandedSearches: bigint("brandedSearches", { mode: "number" }),
+  brandedSearchesClicks: bigint("brandedSearchesClicks", { mode: "number" }),
+  brandedSearchesViews: bigint("brandedSearchesViews", { mode: "number" }),
+  
+  // Video metrics
+  videoCompleteViews: bigint("videoCompleteViews", { mode: "number" }),
+  videoFirstQuartileViews: bigint("videoFirstQuartileViews", { mode: "number" }),
+  videoMidpointViews: bigint("videoMidpointViews", { mode: "number" }),
+  videoThirdQuartileViews: bigint("videoThirdQuartileViews", { mode: "number" }),
+  videoUnmutes: bigint("videoUnmutes", { mode: "number" }),
+  
+  // Engagement metrics
+  addToCart: bigint("addToCart", { mode: "number" }),
+  addToCartViews: bigint("addToCartViews", { mode: "number" }),
+  addToCartClicks: bigint("addToCartClicks", { mode: "number" }),
+  
+  // Kindle metrics
+  qualifiedBorrows: bigint("qualifiedBorrows", { mode: "number" }),
+  qualifiedBorrowsFromClicks: bigint("qualifiedBorrowsFromClicks", { mode: "number" }),
+  qualifiedBorrowsFromViews: bigint("qualifiedBorrowsFromViews", { mode: "number" }),
+  royaltyQualifiedBorrows: bigint("royaltyQualifiedBorrows", { mode: "number" }),
+  royaltyQualifiedBorrowsFromClicks: bigint("royaltyQualifiedBorrowsFromClicks", { mode: "number" }),
+  royaltyQualifiedBorrowsFromViews: bigint("royaltyQualifiedBorrowsFromViews", { mode: "number" }),
+  
+  // List metrics
+  addToList: bigint("addToList", { mode: "number" }),
+  addToListFromClicks: bigint("addToListFromClicks", { mode: "number" }),
+  addToListFromViews: bigint("addToListFromViews", { mode: "number" }),
+  
+  // Lead metrics
+  linkOuts: bigint("linkOuts", { mode: "number" }),
+  leadFormOpens: bigint("leadFormOpens", { mode: "number" }),
+  leads: bigint("leads", { mode: "number" }),
+  
+  // Rate metrics
+  brandedSearchRate: numeric("brandedSearchRate"),
+  viewabilityRate: numeric("viewabilityRate"),
+  viewClickThroughRate: numeric("viewClickThroughRate"),
+  addToCartRate: numeric("addToCartRate"),
+  
+  created_at: timestamp("created_at"),
+});
+
+// Display Targeting table - clean numeric types (equivalent to "Placements" for Display)
+export const displayTargeting = pgTable('s_display_targeting', {
+  id: bigint("id", { mode: "number" }).primaryKey(),
+  date: pgDate("date"),
+  country: text("country"),
+  
+  // Campaign info
+  campaignId: bigint("campaignId", { mode: "number" }),
+  campaignName: text("campaignName"),
+  
+  // Ad group info
+  adGroupId: bigint("adGroupId", { mode: "number" }),
+  adGroupName: text("adGroupName"),
+  
+  // Targeting info
+  targetingId: bigint("targetingId", { mode: "number" }),
+  targetingText: text("targetingText"),
+  targetingExpression: text("targetingExpression"),
+  
+  // Currency
+  campaignBudgetCurrencyCode: text("campaignBudgetCurrencyCode"),
+  
+  // Performance metrics - clean numeric types
+  cost: numeric("cost"),
+  sales: numeric("sales"),
+  salesClicks: numeric("salesClicks"),
+  salesPromotedClicks: numeric("salesPromotedClicks"),
+  newToBrandSales: numeric("newToBrandSales"),
+  newToBrandSalesClicks: numeric("newToBrandSalesClicks"),
+  eCPBrandSearch: numeric("eCPBrandSearch"),
+  eCPAddToCart: numeric("eCPAddToCart"),
+  newToBrandECPDetailPageView: numeric("newToBrandECPDetailPageView"),
+  
+  impressions: bigint("impressions", { mode: "number" }),
+  impressionsViews: bigint("impressionsViews", { mode: "number" }),
+  clicks: bigint("clicks", { mode: "number" }),
+  purchases: bigint("purchases", { mode: "number" }),
+  purchasesClicks: bigint("purchasesClicks", { mode: "number" }),
+  purchasesPromotedClicks: bigint("purchasesPromotedClicks", { mode: "number" }),
+  detailPageViews: bigint("detailPageViews", { mode: "number" }),
+  detailPageViewsClicks: bigint("detailPageViewsClicks", { mode: "number" }),
+  unitsSold: bigint("unitsSold", { mode: "number" }),
+  unitsSoldClicks: bigint("unitsSoldClicks", { mode: "number" }),
+  
+  // New to brand metrics
+  newToBrandPurchases: bigint("newToBrandPurchases", { mode: "number" }),
+  newToBrandPurchasesClicks: bigint("newToBrandPurchasesClicks", { mode: "number" }),
+  newToBrandUnitsSold: bigint("newToBrandUnitsSold", { mode: "number" }),
+  newToBrandUnitsSoldClicks: bigint("newToBrandUnitsSoldClicks", { mode: "number" }),
+  
+  // Branded searches
+  brandedSearches: bigint("brandedSearches", { mode: "number" }),
+  brandedSearchesClicks: bigint("brandedSearchesClicks", { mode: "number" }),
+  brandedSearchesViews: bigint("brandedSearchesViews", { mode: "number" }),
+  
+  // Video metrics
+  videoCompleteViews: bigint("videoCompleteViews", { mode: "number" }),
+  videoFirstQuartileViews: bigint("videoFirstQuartileViews", { mode: "number" }),
+  videoMidpointViews: bigint("videoMidpointViews", { mode: "number" }),
+  videoThirdQuartileViews: bigint("videoThirdQuartileViews", { mode: "number" }),
+  videoUnmutes: bigint("videoUnmutes", { mode: "number" }),
+  
+  // Engagement metrics
+  addToCart: bigint("addToCart", { mode: "number" }),
+  addToCartViews: bigint("addToCartViews", { mode: "number" }),
+  addToCartClicks: bigint("addToCartClicks", { mode: "number" }),
+  
+  // Kindle metrics
+  qualifiedBorrows: bigint("qualifiedBorrows", { mode: "number" }),
+  qualifiedBorrowsFromClicks: bigint("qualifiedBorrowsFromClicks", { mode: "number" }),
+  qualifiedBorrowsFromViews: bigint("qualifiedBorrowsFromViews", { mode: "number" }),
+  royaltyQualifiedBorrows: bigint("royaltyQualifiedBorrows", { mode: "number" }),
+  royaltyQualifiedBorrowsFromClicks: bigint("royaltyQualifiedBorrowsFromClicks", { mode: "number" }),
+  royaltyQualifiedBorrowsFromViews: bigint("royaltyQualifiedBorrowsFromViews", { mode: "number" }),
+  
+  // List metrics
+  addToList: bigint("addToList", { mode: "number" }),
+  addToListFromClicks: bigint("addToListFromClicks", { mode: "number" }),
+  addToListFromViews: bigint("addToListFromViews", { mode: "number" }),
+  
+  // Lead metrics
+  linkOuts: bigint("linkOuts", { mode: "number" }),
+  leadFormOpens: bigint("leadFormOpens", { mode: "number" }),
+  leads: bigint("leads", { mode: "number" }),
+  
+  // New to brand detail page views
+  newToBrandDetailPageViews: bigint("newToBrandDetailPageViews", { mode: "number" }),
+  newToBrandDetailPageViewViews: bigint("newToBrandDetailPageViewViews", { mode: "number" }),
+  newToBrandDetailPageViewClicks: bigint("newToBrandDetailPageViewClicks", { mode: "number" }),
+  
+  // Rate metrics
+  brandedSearchRate: numeric("brandedSearchRate"),
+  viewabilityRate: numeric("viewabilityRate"),
+  viewClickThroughRate: numeric("viewClickThroughRate"),
+  addToCartRate: numeric("addToCartRate"),
+  newToBrandDetailPageViewRate: numeric("newToBrandDetailPageViewRate"),
+  
+  adKeywordStatus: text("adKeywordStatus"),
+  created_at: timestamp("created_at"),
+});
+
 export const recommendations = pgTable("recommendations", {
   id: text("id").primaryKey().default(sql`gen_random_uuid()`),
   scope: text("scope").notNull(),
@@ -250,3 +445,5 @@ export type BrandSearchTerm = typeof brandSearchTerms.$inferSelect;
 export type BrandPlacement = typeof brandPlacement.$inferSelect;
 export type ProductSearchTerm = typeof productSearchTerms.$inferSelect;
 export type ProductPlacement = typeof productPlacement.$inferSelect;
+export type DisplayMatchedTarget = typeof displayMatchedTarget.$inferSelect;
+export type DisplayTargeting = typeof displayTargeting.$inferSelect;
