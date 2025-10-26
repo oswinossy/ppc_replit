@@ -21,14 +21,16 @@ export default function AdGroupView() {
   const [, params] = useRoute("/ad-group/:id");
   const adGroupId = params?.id || "";
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
+  const [campaignType, setCampaignType] = useState<'products' | 'brands' | 'display'>('products');
   const [showRecommendations, setShowRecommendations] = useState(false);
   const { toast } = useToast();
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
-    queryKey: ['/api/kpis', adGroupId, dateRange],
+    queryKey: ['/api/kpis', adGroupId, campaignType, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         adGroupId,
+        campaignType,
         from: dateRange.from, 
         to: dateRange.to 
       });
@@ -38,10 +40,11 @@ export default function AdGroupView() {
   });
 
   const { data: searchTerms, isLoading: searchTermsLoading } = useQuery({
-    queryKey: ['/api/search-terms', adGroupId, dateRange],
+    queryKey: ['/api/search-terms', adGroupId, campaignType, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         adGroupId,
+        campaignType,
         from: dateRange.from, 
         to: dateRange.to 
       });
@@ -51,10 +54,11 @@ export default function AdGroupView() {
   });
 
   const { data: placements, isLoading: placementsLoading } = useQuery({
-    queryKey: ['/api/placements', adGroupId, dateRange],
+    queryKey: ['/api/placements', adGroupId, campaignType, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         adGroupId,
+        campaignType,
         from: dateRange.from, 
         to: dateRange.to 
       });
@@ -70,6 +74,7 @@ export default function AdGroupView() {
         body: JSON.stringify({
           scope: 'ad_group',
           scopeId: adGroupId,
+          campaignType,
           from: dateRange.from,
           to: dateRange.to,
           targetAcos: 20,
@@ -86,7 +91,7 @@ export default function AdGroupView() {
   });
 
   const { data: recommendationsData } = useQuery({
-    queryKey: ['/api/recommendations', adGroupId, dateRange],
+    queryKey: ['/api/recommendations', adGroupId, campaignType, dateRange],
     enabled: showRecommendations,
     queryFn: async () => {
       const result = await generateRecommendationsMutation.mutateAsync();
@@ -99,6 +104,7 @@ export default function AdGroupView() {
   const handleExportNegatives = async () => {
     const params = new URLSearchParams({ 
       adGroupId,
+      campaignType,
       from: dateRange.from, 
       to: dateRange.to 
     });
@@ -163,13 +169,22 @@ export default function AdGroupView() {
           )}
         </div>
 
-        <Tabs defaultValue="search-terms" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="search-terms" data-testid="tab-search-terms">Search Terms</TabsTrigger>
-            <TabsTrigger value="placements" data-testid="tab-placements">Placements</TabsTrigger>
-          </TabsList>
+        <div className="space-y-6">
+          <Tabs value={campaignType} onValueChange={(val) => setCampaignType(val as typeof campaignType)}>
+            <TabsList>
+              <TabsTrigger value="products" data-testid="tab-campaign-products">Sponsored Products</TabsTrigger>
+              <TabsTrigger value="brands" data-testid="tab-campaign-brands">Sponsored Brands</TabsTrigger>
+              <TabsTrigger value="display" data-testid="tab-campaign-display">Display</TabsTrigger>
+            </TabsList>
+          </Tabs>
 
-          <TabsContent value="search-terms" className="space-y-6">
+          <Tabs defaultValue="search-terms" className="space-y-6">
+            <TabsList>
+              <TabsTrigger value="search-terms" data-testid="tab-search-terms">Search Terms</TabsTrigger>
+              <TabsTrigger value="placements" data-testid="tab-placements">Placements</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="search-terms" className="space-y-6">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -232,9 +247,9 @@ export default function AdGroupView() {
                 </div>
               </div>
             )}
-          </TabsContent>
+            </TabsContent>
 
-          <TabsContent value="placements" className="space-y-4">
+            <TabsContent value="placements" className="space-y-4">
             <div>
               <h2 className="text-xl font-semibold">Placement Performance</h2>
               <p className="text-sm text-muted-foreground">Top of Search (TOS) vs Rest of Search (ROS) vs Product Pages (PP)</p>
@@ -253,8 +268,9 @@ export default function AdGroupView() {
                 data={placements}
               />
             ) : null}
-          </TabsContent>
-        </Tabs>
+            </TabsContent>
+          </Tabs>
+        </div>
       </main>
     </div>
   );
