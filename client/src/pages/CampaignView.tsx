@@ -12,10 +12,8 @@ import { useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 
-type CampaignType = 'products' | 'brands' | 'display';
 type ViewMode = 'search-terms' | 'placements';
 
 export default function CampaignView() {
@@ -23,15 +21,13 @@ export default function CampaignView() {
   const [, setLocation] = useLocation();
   const campaignId = params?.id || "";
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
-  const [campaignType, setCampaignType] = useState<CampaignType>('products');
   const [viewMode, setViewMode] = useState<ViewMode>('search-terms');
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
-    queryKey: ['/api/kpis', campaignId, campaignType, dateRange],
+    queryKey: ['/api/kpis', campaignId, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
-        campaignType,
         from: dateRange.from, 
         to: dateRange.to 
       });
@@ -41,11 +37,10 @@ export default function CampaignView() {
   });
 
   const { data: adGroups, isLoading: adGroupsLoading } = useQuery({
-    queryKey: ['/api/ad-groups', campaignId, campaignType, dateRange],
+    queryKey: ['/api/ad-groups', campaignId, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
-        campaignType,
         from: dateRange.from, 
         to: dateRange.to 
       });
@@ -56,7 +51,7 @@ export default function CampaignView() {
 
   const { data: placements, isLoading: placementsLoading } = useQuery({
     queryKey: ['/api/campaign-placements', campaignId, dateRange],
-    enabled: campaignType === 'products' && viewMode === 'placements',
+    enabled: viewMode === 'placements',
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
@@ -69,11 +64,10 @@ export default function CampaignView() {
   });
 
   const { data: chartData, isLoading: chartLoading } = useQuery({
-    queryKey: ['/api/chart-data', campaignId, campaignType, dateRange],
+    queryKey: ['/api/chart-data', campaignId, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
-        campaignType,
         from: dateRange.from, 
         to: dateRange.to,
         grain: 'weekly'
@@ -86,7 +80,6 @@ export default function CampaignView() {
   const handleExportNegatives = async () => {
     const params = new URLSearchParams({ 
       campaignId,
-      campaignType,
       from: dateRange.from, 
       to: dateRange.to 
     });
@@ -139,62 +132,25 @@ export default function CampaignView() {
       </div>
 
       <div className="border-b bg-background">
-        <div className="flex items-center justify-between px-6 py-3">
+        <div className="flex items-center justify-end px-6 py-3">
           <div className="flex items-center gap-2">
             <Badge 
-              variant={campaignType === 'products' ? 'default' : 'outline'}
+              variant={viewMode === 'search-terms' ? 'default' : 'outline'}
               className="cursor-pointer hover-elevate active-elevate-2"
-              onClick={() => {
-                setCampaignType('products');
-                setViewMode('search-terms');
-              }}
-              data-testid="badge-campaign-type-products"
+              onClick={() => setViewMode('search-terms')}
+              data-testid="badge-view-search-terms"
             >
-              Sponsored Products
+              Search Terms
             </Badge>
             <Badge 
-              variant={campaignType === 'brands' ? 'default' : 'outline'}
+              variant={viewMode === 'placements' ? 'default' : 'outline'}
               className="cursor-pointer hover-elevate active-elevate-2"
-              onClick={() => {
-                setCampaignType('brands');
-                setViewMode('search-terms');
-              }}
-              data-testid="badge-campaign-type-brands"
+              onClick={() => setViewMode('placements')}
+              data-testid="badge-view-placements"
             >
-              Sponsored Brands
-            </Badge>
-            <Badge 
-              variant={campaignType === 'display' ? 'default' : 'outline'}
-              className="cursor-pointer hover-elevate active-elevate-2"
-              onClick={() => {
-                setCampaignType('display');
-                setViewMode('search-terms');
-              }}
-              data-testid="badge-campaign-type-display"
-            >
-              Display
+              Placements
             </Badge>
           </div>
-          {campaignType === 'products' && (
-            <div className="flex items-center gap-2">
-              <Badge 
-                variant={viewMode === 'search-terms' ? 'default' : 'outline'}
-                className="cursor-pointer hover-elevate active-elevate-2"
-                onClick={() => setViewMode('search-terms')}
-                data-testid="badge-view-search-terms"
-              >
-                Search Terms
-              </Badge>
-              <Badge 
-                variant={viewMode === 'placements' ? 'default' : 'outline'}
-                className="cursor-pointer hover-elevate active-elevate-2"
-                onClick={() => setViewMode('placements')}
-                data-testid="badge-view-placements"
-              >
-                Placements
-              </Badge>
-            </div>
-          )}
         </div>
       </div>
 

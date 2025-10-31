@@ -45,24 +45,38 @@ The app will be available on port 5000.
 - **Negative Keywords**: Auto-detection with ≥20 clicks, $0 sales
 - **Excel Export**: Download negative keywords for bulk upload
 
-### Campaign Type Segmentation (6-View System)
-The Ad Group view provides a campaign type selector allowing users to view data segmented by Amazon campaign type:
+### Navigation Structure
 
-**3 Campaign Types:**
-1. **Sponsored Products** (default): Search ads targeting products
-2. **Sponsored Brands**: Brand awareness campaigns
-3. **Display**: Display advertising campaigns
+**Campaign Level:**
+- View toggle: **Search Terms** | **Placements**
+- Placements view shows campaign-level aggregated data (Sponsored Products only)
+- Search Terms view lists all ad groups in the campaign
 
-**2 Views per Campaign Type:**
-1. **Search Terms**: Keyword/targeting performance with bid recommendations
-2. **Placements**: Placement type performance (TOS, ROS, PP, etc.)
+**Ad Group Level:**
+- Campaign type selector: **Sponsored Products** | **Sponsored Brands** | **Display**
+- Shows search terms view only (placements are at campaign level)
+- Campaign type selector filters data by campaign type
 
 **Implementation Details:**
-- Campaign type selector updates URL with `?campaignType=products|brands|display` parameter
-- View toggle switches between Search Terms and Placements
-- All API endpoints (`/api/kpis`, `/api/search-terms`, `/api/placements`) accept `campaignType` parameter
+- Campaign-level placements aggregate data across all ad groups
+- Ad Group level accepts `campaignType` parameter for filtering
 - **Critical**: Products campaign type filters by `adGroupId`; Brands and Display do NOT use adGroupId filter (those tables don't have this field)
 - Display campaigns use `targetingText` instead of `searchTerm` and `matchedTargetAsin` instead of `keyword`
+
+### Campaign-Level Placement Bid Adjustments
+Placement bid adjustments are calculated as percentage modifiers (not absolute bids) targeting 20% ACOS:
+
+**Adjustment Logic:**
+- **ACOS ≤ 16%** (well below target): +10% to +20% increase (scales with click volume)
+- **ACOS > 20%** (above target): Formula-based decrease: `(20% / current_acos - 1) × 100`, capped at -50%
+- **ACOS 16-20%**: Small adjustments -10% to +10%
+- **No sales** with ≥30 clicks: -25% decrease
+
+**Confidence Scaling:**
+- 1000+ clicks → +20% adjustment for high performers
+- 300-999 clicks → +15% adjustment
+- 30-299 clicks → +10% adjustment
+- <30 clicks → No recommendation (insufficient data)
 
 ### Recommendation Engine
 - **Confidence Levels**:
@@ -195,6 +209,13 @@ Example response structure:
 - Responsive grid layouts
 
 ## Recent Changes
+- **2025-10-31**: ✅ Implemented campaign-level placement bid adjustments
+  - Created `/api/campaign-placements` endpoint aggregating placement data across all ad groups
+  - Added placement bid adjustment recommendations (percentage-based, 20% ACOS target)
+  - Updated Campaign view with Search Terms/Placements toggle (Sponsored Products only)
+  - Removed placements toggle from Ad Group view (now search terms only)
+  - Placement adjustments scale with confidence: +20% for 1000+ clicks, +15% for 300-999, +10% for 30-299
+  - Formula-based decreases for ACOS >20%, capped at -50%
 - **2025-10-26**: ✅ Implemented 6-view campaign type segmentation system
   - Added Display table schemas (s_display_matched_target, s_display_targeting) to shared/schema.ts
   - Updated AdGroupView.tsx with campaign type selector (Sponsored Products | Sponsored Brands | Display)
