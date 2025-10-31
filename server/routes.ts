@@ -703,6 +703,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Campaign-level placements endpoint - aggregates across all ad groups (Sponsored Products only)
+  app.get("/api/campaign-placements", async (req, res) => {
+    try {
+      const { campaignId, from, to } = req.query;
+      const targetAcos = 20; // 20% target ACOS
+      
+      // Query product placements aggregated across all ad groups in the campaign
+      const conditions = [];
+      if (campaignId) conditions.push(sql`${productPlacement.campaignId}::text = ${campaignId}`);
+      if (from) conditions.push(gte(productPlacement.date, from as string));
+      if (to) conditions.push(lte(productPlacement.date, to as string));
+
+      const results = await db
+        .select({
+          placement: productPlacement.campaignPlacement,
+          clicks: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.clicks}, '')::numeric), 0)`,
+          cost: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.cost}, '')::numeric), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.sales7d}, '')::numeric), 0)`,
+          purchases: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.purchases7d}, '')::numeric), 0)`,
+        })
+        .from(productPlacement)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .groupBy(productPlacement.campaignPlacement);
+
+      // Calculate bid adjustments for each placement
+      const placements = results
+        .filter(row => row.placement)
+        .map(row => {
+          const clicks = Number(row.clicks);
+          const cost = Number(row.cost);
+          const sales = Number(row.sales);
+          const orders = Number(row.purchases);
+          const acos = calculateACOS(cost, sales);
+          const cpc = clicks > 0 ? cost / clicks : 0;
+          
+          // Calculate bid adjustment recommendation based on ACOS
+          let bidAdjustment = 0;
+          
+          if (clicks >= 30 && sales > 0) {
+            if (acos <= targetAcos * 0.8) {
+              // ACOS well below target (≤16%), increase bid adjustment
+              if (clicks >= 1000) {
+                bidAdjustment = 20; // +20%
+              } else if (clicks >= 300) {
+                bidAdjustment = 15; // +15%
+              } else {
+                bidAdjustment = 10; // +10%
+              }
+            } else if (acos > targetAcos) {
+              // ACOS above target, decrease bid adjustment using formula
+              const targetAdjustment = (targetAcos / acos - 1) * 100;
+              bidAdjustment = Math.max(-50, Math.min(0, targetAdjustment)); // Cap at -50%
+            } else {
+              // ACOS near target, small adjustment
+              bidAdjustment = (targetAcos / acos - 1) * 100;
+              bidAdjustment = Math.max(-10, Math.min(10, bidAdjustment));
+            }
+          } else if (clicks >= 30 && sales === 0) {
+            // No sales, recommend decreasing bid
+            bidAdjustment = -25; // -25%
+          }
+          
+          // Round to nearest integer
+          bidAdjustment = Math.round(bidAdjustment);
+
+          return {
+            placement: row.placement || 'UNKNOWN',
+            clicks,
+            cost,
+            sales,
+            orders,
+            acos,
+            cpc,
+            bidAdjustment,
+          };
+        })
+        .sort((a, b) => b.sales - a.sales);
+
+      res.json(placements);
+    } catch (error) {
+      console.error('Campaign placements error:', error);
+      res.status(500).json({ error: 'Failed to fetch campaign placements' });
+    }
+  });
+
   // Chart data endpoint with aggregation - combines brand + product
   app.get("/api/chart-data", async (req, res) => {
     try {
