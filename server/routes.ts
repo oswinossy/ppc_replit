@@ -709,153 +709,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { campaignId, from, to } = req.query;
       const targetAcos = 20; // 20% target ACOS
       
-      // Query product placements aggregated across all ad groups in the campaign
+      // Query ALL placement data for the campaign in one go (not aggregated yet)
       const conditions: any[] = [];
       if (campaignId) conditions.push(sql`${productPlacement.campaignId}::text = ${campaignId}`);
       if (from) conditions.push(gte(productPlacement.date, from as string));
       if (to) conditions.push(lte(productPlacement.date, to as string));
 
-      const results = await db
+      const allResults = await db
         .select({
           placement: productPlacement.campaignPlacement,
           biddingStrategy: productPlacement.campaignBiddingStrategy,
-          impressions: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.impressions}, '')::numeric), 0)`,
-          clicks: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.clicks}, '')::numeric), 0)`,
-          cost: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.cost}, '')::numeric), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.sales7d}, '')::numeric), 0)`,
-          purchases: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.purchases7d}, '')::numeric), 0)`,
-          currency: productPlacement.country,
+          date: productPlacement.date,
+          country: productPlacement.country,
+          impressions: sql<string>`NULLIF(${productPlacement.impressions}, '')`,
+          clicks: sql<string>`NULLIF(${productPlacement.clicks}, '')`,
+          cost: sql<string>`NULLIF(${productPlacement.cost}, '')`,
+          sales: sql<string>`NULLIF(${productPlacement.sales7d}, '')`,
+          purchases: sql<string>`NULLIF(${productPlacement.purchases7d}, '')`,
         })
-        .from(productPlacement)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(productPlacement.campaignPlacement, productPlacement.campaignBiddingStrategy, productPlacement.country);
-
-      // Group by placement and currency for EUR conversion
-      const grouped = new Map<string, { data: any[], currencies: Set<string> }>();
-      
-      results.forEach(row => {
-        const key = `${row.placement}_${row.biddingStrategy}`;
-        if (!grouped.has(key)) {
-          grouped.set(key, { data: [], currencies: new Set() });
-        }
-        grouped.get(key)!.data.push(row);
-        grouped.get(key)!.currencies.add(row.currency as string);
-      });
-
-      // Get all unique dates for exchange rates
-      const allDates = await db
-        .selectDistinct({ date: productPlacement.date })
         .from(productPlacement)
         .where(conditions.length > 0 ? and(...conditions) : undefined);
 
-      const uniqueDates = Array.from(new Set(allDates.map(d => d.date).filter(d => d !== null))) as string[];
-      
-      // Fetch exchange rates for all dates
+      // Get unique dates for exchange rates (fetch all at once)
+      const uniqueDates = Array.from(new Set(allResults.map(r => r.date).filter(d => d !== null))) as string[];
       const exchangeRatesMap = new Map();
       for (const date of uniqueDates) {
         const rates = await getExchangeRatesForDate(date);
         exchangeRatesMap.set(date, rates);
       }
 
-      // Process each placement group
-      const placements = await Promise.all(
-        Array.from(grouped.entries()).map(async ([key, group]) => {
-          const [placement, biddingStrategy] = key.split('_');
-          
-          // Convert to EUR for each row
-          let totalImpressions = 0;
-          let totalClicks = 0;
-          let totalCostEur = 0;
-          let totalSalesEur = 0;
-          let totalOrders = 0;
+      // Group and aggregate data in memory
+      const placementGroups = new Map<string, {
+        placement: string;
+        biddingStrategy: string;
+        totalImpressions: number;
+        totalClicks: number;
+        totalCostEur: number;
+        totalSalesEur: number;
+        totalOrders: number;
+      }>();
 
-          for (const row of group.data) {
-            const country = row.currency as string;
-            
-            // Get aggregated data by date and currency for conversion
-            const dateResults = await db
-              .select({
-                date: productPlacement.date,
-                impressions: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.impressions}, '')::numeric), 0)`,
-                clicks: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.clicks}, '')::numeric), 0)`,
-                cost: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.cost}, '')::numeric), 0)`,
-                sales: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.sales7d}, '')::numeric), 0)`,
-                purchases: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.purchases7d}, '')::numeric), 0)`,
-              })
-              .from(productPlacement)
-              .where(and(
-                ...(conditions.length > 0 ? conditions : [sql`1=1`]),
-                eq(productPlacement.campaignPlacement, placement),
-                eq(productPlacement.campaignBiddingStrategy, biddingStrategy || ''),
-                eq(productPlacement.country, country)
-              ))
-              .groupBy(productPlacement.date);
+      // Process all results in memory
+      allResults.forEach(row => {
+        const key = `${row.placement || 'UNKNOWN'}_${row.biddingStrategy || 'Not set'}`;
+        
+        if (!placementGroups.has(key)) {
+          placementGroups.set(key, {
+            placement: row.placement || 'UNKNOWN',
+            biddingStrategy: row.biddingStrategy || 'Not set',
+            totalImpressions: 0,
+            totalClicks: 0,
+            totalCostEur: 0,
+            totalSalesEur: 0,
+            totalOrders: 0,
+          });
+        }
 
-            for (const dateRow of dateResults) {
-              const rates = exchangeRatesMap.get(dateRow.date) || {};
-              const costEur = convertToEur(Number(dateRow.cost), country, rates);
-              const salesEur = convertToEur(Number(dateRow.sales), country, rates);
-              
-              totalImpressions += Number(dateRow.impressions);
-              totalClicks += Number(dateRow.clicks);
-              totalCostEur += costEur;
-              totalSalesEur += salesEur;
-              totalOrders += Number(dateRow.purchases);
-            }
-          }
+        const group = placementGroups.get(key)!;
+        const rates = exchangeRatesMap.get(row.date) || {};
+        const country = row.country as string;
 
-          const acos = calculateACOS(totalCostEur, totalSalesEur);
-          const cpc = totalClicks > 0 ? totalCostEur / totalClicks : 0;
-          const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
-          const cvr = totalClicks > 0 ? (totalOrders / totalClicks) * 100 : 0;
-          
-          // Calculate recommended bid adjustment based on ACOS
-          let recommendedBidAdjustment = 0;
-          
-          if (totalClicks >= 30 && totalSalesEur > 0) {
-            if (acos <= targetAcos * 0.8) {
-              // ACOS well below target (≤16%), increase bid adjustment
-              if (totalClicks >= 1000) {
-                recommendedBidAdjustment = 20; // +20%
-              } else if (totalClicks >= 300) {
-                recommendedBidAdjustment = 15; // +15%
-              } else {
-                recommendedBidAdjustment = 10; // +10%
-              }
-            } else if (acos > targetAcos) {
-              // ACOS above target, decrease bid adjustment using formula
-              const targetAdjustment = (targetAcos / acos - 1) * 100;
-              recommendedBidAdjustment = Math.max(-50, Math.min(0, targetAdjustment)); // Cap at -50%
+        // Convert to EUR and aggregate
+        const impressions = Number(row.impressions || 0);
+        const clicks = Number(row.clicks || 0);
+        const cost = Number(row.cost || 0);
+        const sales = Number(row.sales || 0);
+        const orders = Number(row.purchases || 0);
+
+        const costEur = convertToEur(cost, country, rates);
+        const salesEur = convertToEur(sales, country, rates);
+
+        group.totalImpressions += impressions;
+        group.totalClicks += clicks;
+        group.totalCostEur += costEur;
+        group.totalSalesEur += salesEur;
+        group.totalOrders += orders;
+      });
+
+      // Calculate metrics and recommendations
+      const placements = Array.from(placementGroups.values()).map(group => {
+        const acos = calculateACOS(group.totalCostEur, group.totalSalesEur);
+        const cpc = group.totalClicks > 0 ? group.totalCostEur / group.totalClicks : 0;
+        const ctr = group.totalImpressions > 0 ? (group.totalClicks / group.totalImpressions) * 100 : 0;
+        const cvr = group.totalClicks > 0 ? (group.totalOrders / group.totalClicks) * 100 : 0;
+        
+        // Calculate recommended bid adjustment based on ACOS
+        let recommendedBidAdjustment = 0;
+        
+        if (group.totalClicks >= 30 && group.totalSalesEur > 0) {
+          if (acos <= targetAcos * 0.8) {
+            // ACOS well below target (≤16%), increase bid adjustment
+            if (group.totalClicks >= 1000) {
+              recommendedBidAdjustment = 20; // +20%
+            } else if (group.totalClicks >= 300) {
+              recommendedBidAdjustment = 15; // +15%
             } else {
-              // ACOS near target, small adjustment
-              recommendedBidAdjustment = (targetAcos / acos - 1) * 100;
-              recommendedBidAdjustment = Math.max(-10, Math.min(10, recommendedBidAdjustment));
+              recommendedBidAdjustment = 10; // +10%
             }
-          } else if (totalClicks >= 30 && totalSalesEur === 0) {
-            // No sales, recommend decreasing bid
-            recommendedBidAdjustment = -25; // -25%
+          } else if (acos > targetAcos) {
+            // ACOS above target, decrease bid adjustment using formula
+            const targetAdjustment = (targetAcos / acos - 1) * 100;
+            recommendedBidAdjustment = Math.max(-50, Math.min(0, targetAdjustment)); // Cap at -50%
+          } else {
+            // ACOS near target, small adjustment
+            recommendedBidAdjustment = (targetAcos / acos - 1) * 100;
+            recommendedBidAdjustment = Math.max(-10, Math.min(10, recommendedBidAdjustment));
           }
-          
-          // Round to nearest integer
-          recommendedBidAdjustment = Math.round(recommendedBidAdjustment);
+        } else if (group.totalClicks >= 30 && group.totalSalesEur === 0) {
+          // No sales, recommend decreasing bid
+          recommendedBidAdjustment = -25; // -25%
+        }
+        
+        // Round to nearest integer
+        recommendedBidAdjustment = Math.round(recommendedBidAdjustment);
 
-          return {
-            placement: placement || 'UNKNOWN',
-            biddingStrategy: biddingStrategy || 'Not set',
-            bidAdjustment: null, // Current bid adjustment from Amazon (not in our data yet)
-            impressions: totalImpressions,
-            clicks: totalClicks,
-            ctr,
-            spend: totalCostEur,
-            cpc,
-            orders: totalOrders,
-            sales: totalSalesEur,
-            acos,
-            cvr,
-            recommendedBidAdjustment,
-          };
-        })
-      );
+        return {
+          placement: group.placement,
+          biddingStrategy: group.biddingStrategy,
+          bidAdjustment: null, // Current bid adjustment from Amazon (not in our data yet)
+          impressions: group.totalImpressions,
+          clicks: group.totalClicks,
+          ctr,
+          spend: group.totalCostEur,
+          cpc,
+          orders: group.totalOrders,
+          sales: group.totalSalesEur,
+          acos,
+          cvr,
+          recommendedBidAdjustment,
+        };
+      });
 
       // Sort by placement priority: TOS > ROS > PP > UNKNOWN
       const placementOrder = { 'Top of search (first page)': 1, 'Rest of search': 2, 'Product pages': 3, 'UNKNOWN': 4 };

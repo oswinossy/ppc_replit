@@ -235,8 +235,10 @@ export default function CampaignView() {
                   { key: "recommendedBidAdjustment", label: "Recommended Bid Adjustment", align: "right", sortable: true, render: (val) => {
                     const adjustment = Number(val ?? 0);
                     if (adjustment === 0) return <span className="text-muted-foreground">-</span>;
-                    const color = adjustment > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
-                    return <span className={`font-semibold ${color}`}>{adjustment > 0 ? '+' : ''}{adjustment}%</span>;
+                    if (adjustment > 0) {
+                      return <span className="font-semibold text-green-600 dark:text-green-400">+{adjustment}%</span>;
+                    }
+                    return <span className="font-semibold text-red-600 dark:text-red-400">{adjustment}%</span>;
                   }},
                 ]}
                 data={placements}
