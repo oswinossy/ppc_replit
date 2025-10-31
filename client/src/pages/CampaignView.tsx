@@ -232,14 +232,24 @@ export default function CampaignView() {
                   { key: "orders", label: "Orders", align: "right", sortable: true },
                   { key: "sales", label: "Sales", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
                   { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
-                  { key: "recommendedBidAdjustment", label: "Recommended Bid Adjustment", align: "right", sortable: true, render: (val) => {
-                    const adjustment = Number(val ?? 0);
-                    if (adjustment === 0) return <span className="text-muted-foreground">-</span>;
-                    if (adjustment > 0) {
-                      return <span className="font-semibold text-green-600 dark:text-green-400">+{adjustment}%</span>;
+                  { 
+                    key: "recommendedBidAdjustment", 
+                    label: "Recommended Bid Adjustment", 
+                    align: "right", 
+                    sortable: true,
+                    cellClassName: (val) => {
+                      const adjustment = Number(val ?? 0);
+                      if (adjustment === 0) return "text-muted-foreground";
+                      if (adjustment > 0) return "font-semibold text-green-600 dark:text-green-400";
+                      return "font-semibold text-red-600 dark:text-red-400";
+                    },
+                    render: (val) => {
+                      const adjustment = Number(val ?? 0);
+                      if (adjustment === 0) return "-";
+                      if (adjustment > 0) return `+${adjustment}%`;
+                      return `${adjustment}%`;
                     }
-                    return <span className="font-semibold text-red-600 dark:text-red-400">{adjustment}%</span>;
-                  }},
+                  },
                 ]}
                 data={placements}
               />

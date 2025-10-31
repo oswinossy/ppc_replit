@@ -8,6 +8,7 @@ interface Column {
   align?: "left" | "right" | "center";
   sortable?: boolean;
   render?: (value: any, row: any) => React.ReactNode;
+  cellClassName?: (value: any, row: any) => string;
 }
 
 interface DataTableProps {
@@ -68,15 +69,21 @@ export default function DataTable({ columns, data, onRowClick }: DataTableProps)
               onClick={() => onRowClick?.(row)}
               data-testid={`table-row-${index}`}
             >
-              {columns.map((column) => (
-                <TableCell 
-                  key={column.key} 
-                  className={column.align === "right" ? "text-right font-mono" : ""}
-                  data-testid={`table-cell-${column.key}-${index}`}
-                >
-                  {column.render ? column.render(row[column.key], row) : row[column.key]}
-                </TableCell>
-              ))}
+              {columns.map((column) => {
+                const baseClassName = column.align === "right" ? "text-right font-mono" : "";
+                const customClassName = column.cellClassName ? column.cellClassName(row[column.key], row) : "";
+                const cellClassName = `${baseClassName} ${customClassName}`.trim();
+                
+                return (
+                  <TableCell 
+                    key={column.key} 
+                    className={cellClassName}
+                    data-testid={`table-cell-${column.key}-${index}`}
+                  >
+                    {column.render ? column.render(row[column.key], row) : row[column.key]}
+                  </TableCell>
+                );
+              })}
               {onRowClick && (
                 <TableCell className="text-muted-foreground">
                   <ChevronRight className="h-4 w-4" />
