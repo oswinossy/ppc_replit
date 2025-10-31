@@ -218,16 +218,25 @@ export default function CampaignView() {
               <DataTable
                 columns={[
                   { key: "placement", label: "Placement", sortable: true },
-                  { key: "clicks", label: "Clicks", align: "right", sortable: true },
-                  { key: "cost", label: "Cost (€)", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
-                  { key: "sales", label: "Sales (€)", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
-                  { key: "orders", label: "Orders", align: "right", sortable: true },
-                  { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
-                  { key: "cpc", label: "CPC (€)", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
+                  { key: "biddingStrategy", label: "Campaign Bidding Strategy", sortable: true },
                   { key: "bidAdjustment", label: "Bid Adjustment", align: "right", sortable: true, render: (val) => {
+                    if (val === null || val === undefined) return '-';
+                    const adjustment = Number(val);
+                    return `${adjustment}%`;
+                  }},
+                  { key: "impressions", label: "Impressions", align: "right", sortable: true, render: (val) => Number(val ?? 0).toLocaleString() },
+                  { key: "clicks", label: "Clicks", align: "right", sortable: true, render: (val) => Number(val ?? 0).toLocaleString() },
+                  { key: "ctr", label: "CTR", align: "right", sortable: true, render: (val) => `${Number(val ?? 0).toFixed(2)}%` },
+                  { key: "spend", label: "Spend", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
+                  { key: "cpc", label: "CPC", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
+                  { key: "orders", label: "Orders", align: "right", sortable: true },
+                  { key: "sales", label: "Sales", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
+                  { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
+                  { key: "recommendedBidAdjustment", label: "Recommended Bid Adjustment", align: "right", sortable: true, render: (val) => {
                     const adjustment = Number(val ?? 0);
-                    const color = adjustment > 0 ? 'text-green-600 dark:text-green-400' : adjustment < 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground';
-                    return <span className={color}>{adjustment > 0 ? '+' : ''}{adjustment.toFixed(0)}%</span>;
+                    if (adjustment === 0) return <span className="text-muted-foreground">-</span>;
+                    const color = adjustment > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
+                    return <span className={`font-semibold ${color}`}>{adjustment > 0 ? '+' : ''}{adjustment}%</span>;
                   }},
                 ]}
                 data={placements}
