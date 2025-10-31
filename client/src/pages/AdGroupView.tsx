@@ -53,19 +53,6 @@ export default function AdGroupView() {
     },
   });
 
-  const { data: placements, isLoading: placementsLoading } = useQuery({
-    queryKey: ['/api/placements', adGroupId, campaignType, dateRange],
-    queryFn: async () => {
-      const params = new URLSearchParams({ 
-        adGroupId,
-        campaignType,
-        from: dateRange.from, 
-        to: dateRange.to 
-      });
-      const response = await fetch(`/api/placements?${params}`);
-      return response.json();
-    },
-  });
 
   const generateRecommendationsMutation = useMutation({
     mutationFn: async () => {
@@ -177,14 +164,6 @@ export default function AdGroupView() {
               <TabsTrigger value="display" data-testid="tab-campaign-display">Display</TabsTrigger>
             </TabsList>
           </Tabs>
-
-          <Tabs defaultValue="search-terms" className="space-y-6">
-            <TabsList>
-              <TabsTrigger value="search-terms" data-testid="tab-search-terms">Search Terms</TabsTrigger>
-              <TabsTrigger value="placements" data-testid="tab-placements">Placements</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="search-terms" className="space-y-6">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -247,29 +226,6 @@ export default function AdGroupView() {
                 </div>
               </div>
             )}
-            </TabsContent>
-
-            <TabsContent value="placements" className="space-y-4">
-            <div>
-              <h2 className="text-xl font-semibold">Placement Performance</h2>
-              <p className="text-sm text-muted-foreground">Top of Search (TOS) vs Rest of Search (ROS) vs Product Pages (PP)</p>
-            </div>
-            {placementsLoading ? (
-              <Skeleton className="h-64" />
-            ) : placements ? (
-              <DataTable
-                columns={[
-                  { key: "placement", label: "Placement", sortable: true },
-                  { key: "clicks", label: "Clicks", align: "right", sortable: true },
-                  { key: "cost", label: "Cost (€)", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
-                  { key: "sales", label: "Sales (€)", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
-                  { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
-                ]}
-                data={placements}
-              />
-            ) : null}
-            </TabsContent>
-          </Tabs>
         </div>
       </main>
     </div>
