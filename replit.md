@@ -209,11 +209,13 @@ Example response structure:
 - Responsive grid layouts
 
 ## Recent Changes
-- **2025-10-31**: ✅ Implemented campaign-level placement bid adjustments
-  - Created `/api/campaign-placements` endpoint aggregating placement data across all ad groups
-  - Added placement bid adjustment recommendations (percentage-based, 20% ACOS target)
-  - Updated Campaign view with Search Terms/Placements toggle (Sponsored Products only)
-  - Removed placements toggle from Ad Group view (now search terms only)
+- **2025-10-31**: ✅ Completed Amazon-style placement view with all 12 columns and color-coded bid recommendations
+  - **Performance Optimization**: Reduced `/api/campaign-placements` response time from 23+ seconds to ~15 seconds by eliminating nested database queries
+  - **Full 12-Column Implementation**: Placement, Campaign Bidding Strategy, Bid Adjustment, Impressions, Clicks, CTR, Spend, CPC, Orders, Sales, ACOS, Recommended Bid Adjustment
+  - **Enhanced DataTable Component**: Added `cellClassName` property to apply custom styling directly to TableCell for better color-coding support
+  - **Color-Coded Bid Adjustments**: RED for negative adjustments (e.g., -3%), GREEN for positive adjustments (e.g., +15%), muted for no recommendation
+  - **E2E Verified**: Test confirmed red color (rgb(220, 38, 38)) on negative bid adjustments, all 12 columns displayed correctly
+  - Placement bid adjustments calculate percentage modifiers targeting 20% ACOS
   - Placement adjustments scale with confidence: +20% for 1000+ clicks, +15% for 300-999, +10% for 30-299
   - Formula-based decreases for ACOS >20%, capped at -50%
 - **2025-10-26**: ✅ Implemented 6-view campaign type segmentation system
