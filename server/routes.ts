@@ -13,7 +13,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // KPI aggregation endpoint - filters by campaign type
   app.get("/api/kpis", async (req, res) => {
     try {
-      const { country, campaignId, adGroupId, campaignType = 'products', from, to } = req.query;
+      const { country, campaignId, adGroupId, campaignType = 'products', from, to, convertToEur = 'true' } = req.query;
+      const shouldConvertToEur = convertToEur === 'true';
       
       let results: Array<{ date: any; currency: any; clicks: number; cost: number; sales: number; orders: number }> = [];
 
@@ -80,49 +81,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .groupBy(productSearchTerms.date, productSearchTerms.campaignBudgetCurrencyCode);
       }
 
-      // Get unique dates for exchange rate fetching
-      const uniqueDates = new Set<string>();
-      results.forEach(row => row.date && uniqueDates.add(row.date));
+      // Aggregate data (with optional EUR conversion)
+      let totalClicks = 0;
+      let totalCost = 0;
+      let totalSales = 0;
+      let totalOrders = 0;
+      let resultCurrency = 'EUR';
 
-      // Fetch exchange rates for each unique date
-      const exchangeRatesCache = new Map<string, Record<string, number>>();
-      for (const date of Array.from(uniqueDates)) {
-        const rates = await getExchangeRatesForDate(date);
-        exchangeRatesCache.set(date, rates);
+      if (shouldConvertToEur) {
+        // Get unique dates for exchange rate fetching
+        const uniqueDates = new Set<string>();
+        results.forEach(row => row.date && uniqueDates.add(row.date));
+
+        // Fetch exchange rates for each unique date
+        const exchangeRatesCache = new Map<string, Record<string, number>>();
+        for (const date of Array.from(uniqueDates)) {
+          const rates = await getExchangeRatesForDate(date);
+          exchangeRatesCache.set(date, rates);
+        }
+
+        // Convert to EUR and aggregate
+        results.forEach(row => {
+          if (!row.date) return;
+          
+          const rates = exchangeRatesCache.get(row.date) || {};
+          const costEur = convertToEur(Number(row.cost), row.currency || 'EUR', rates);
+          const salesEur = convertToEur(Number(row.sales), row.currency || 'EUR', rates);
+
+          totalClicks += Number(row.clicks);
+          totalCost += costEur;
+          totalSales += salesEur;
+          totalOrders += Number(row.orders);
+        });
+        resultCurrency = 'EUR';
+      } else {
+        // Keep local currency - no conversion
+        // GUARD: Ensure single currency when not converting
+        const uniqueCurrencies = new Set(results.map(r => r.currency).filter(Boolean));
+        if (uniqueCurrencies.size > 1) {
+          return res.status(400).json({ 
+            error: 'Cannot aggregate multiple currencies without conversion. Use convertToEur=true or filter by country.' 
+          });
+        }
+        
+        results.forEach(row => {
+          totalClicks += Number(row.clicks);
+          totalCost += Number(row.cost);
+          totalSales += Number(row.sales);
+          totalOrders += Number(row.orders);
+        });
+        // Safe to use first currency now - we've verified there's only one
+        resultCurrency = results[0]?.currency || 'EUR';
       }
 
-      // Convert to EUR and aggregate
-      let totalClicks = 0;
-      let totalCostEur = 0;
-      let totalSalesEur = 0;
-      let totalOrders = 0;
-
-      results.forEach(row => {
-        if (!row.date) return;
-        
-        const rates = exchangeRatesCache.get(row.date) || {};
-        const costEur = convertToEur(Number(row.cost), row.currency || 'EUR', rates);
-        const salesEur = convertToEur(Number(row.sales), row.currency || 'EUR', rates);
-
-        totalClicks += Number(row.clicks);
-        totalCostEur += costEur;
-        totalSalesEur += salesEur;
-        totalOrders += Number(row.orders);
-      });
-
-      const acos = calculateACOS(totalCostEur, totalSalesEur);
-      const cpc = calculateCPC(totalCostEur, totalClicks);
-      const roas = calculateROAS(totalSalesEur, totalCostEur);
+      const acos = calculateACOS(totalCost, totalSales);
+      const cpc = calculateCPC(totalCost, totalClicks);
+      const roas = calculateROAS(totalSales, totalCost);
 
       res.json({
-        adSales: totalSalesEur,
+        adSales: totalSales,
         acos,
         cpc,
-        cost: totalCostEur,
+        cost: totalCost,
         roas,
         orders: totalOrders,
         clicks: totalClicks,
-        currency: 'EUR',
+        currency: resultCurrency,
       });
     } catch (error) {
       console.error('KPI error:', error);
