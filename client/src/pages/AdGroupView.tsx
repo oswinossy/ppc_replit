@@ -19,11 +19,10 @@ import { useToast } from "@/hooks/use-toast";
 
 export default function AdGroupView() {
   const [, params] = useRoute("/ad-group/:id");
-  const [location] = useLocation();
   const adGroupId = params?.id || "";
   
-  // Extract country from query parameters
-  const searchParams = new URLSearchParams(location.split('?')[1] || '');
+  // Extract country from query parameters (use window.location.search since wouter location only has pathname)
+  const searchParams = new URLSearchParams(window.location.search);
   const countryCode = searchParams.get('country');
   
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });

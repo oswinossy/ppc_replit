@@ -25,7 +25,8 @@ export default function CountryView() {
       const params = new URLSearchParams({ 
         country: countryCode,
         from: dateRange.from, 
-        to: dateRange.to 
+        to: dateRange.to,
+        convertToEur: 'false' // Display in local currency for country-specific views
       });
       const response = await fetch(`/api/kpis?${params}`);
       return response.json();

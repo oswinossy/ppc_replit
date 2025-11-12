@@ -13,8 +13,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // KPI aggregation endpoint - filters by campaign type
   app.get("/api/kpis", async (req, res) => {
     try {
-      const { country, campaignId, adGroupId, campaignType = 'products', from, to, convertToEur = 'true' } = req.query;
-      const shouldConvertToEur = convertToEur === 'true';
+      const { country, campaignId, adGroupId, campaignType = 'products', from, to, convertToEur: convertToEurParam = 'true' } = req.query;
+      const shouldConvertToEur = convertToEurParam === 'true';
       
       let results: Array<{ date: any; currency: any; clicks: number; cost: number; sales: number; orders: number }> = [];
 

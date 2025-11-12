@@ -18,11 +18,11 @@ type ViewMode = 'search-terms' | 'placements';
 
 export default function CampaignView() {
   const [, params] = useRoute("/campaign/:id");
-  const [location, setLocation] = useLocation();
+  const [, setLocation] = useLocation();
   const campaignId = params?.id || "";
   
-  // Extract country from query parameters
-  const searchParams = new URLSearchParams(location.split('?')[1] || '');
+  // Extract country from query parameters (use window.location.search since wouter location only has pathname)
+  const searchParams = new URLSearchParams(window.location.search);
   const countryCode = searchParams.get('country');
   
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
