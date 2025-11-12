@@ -42,11 +42,15 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - No sales (≥30 clicks): -25% decrease.
 - **Recommendation Engine**: Provides bid adjustments based on ACOS and sales data, with safeguards (20%-150% of base bid). Confidence levels (Extreme, High, Good, OK) are based on click volume.
 - **Currency Conversion System**:
-    - Multi-currency display (EUR for dashboard, local for countries).
-    - Navigation preserves currency preference.
-    - Uses Frankfurter API for daily ECB exchange rates.
-    - Backend API (`/api/kpis`) supports `convertToEur` parameter.
-    - Frontend handles country code via query parameters.
+    - **Dashboard**: All metrics displayed in EUR with full conversion from all currencies (USD, GBP, SEK, PLN) using daily ECB exchange rates.
+    - **Country Views**: Metrics displayed in local currency (USD for US, GBP for GB, SEK for SE, PLN for PL, EUR for DE/FR/etc).
+    - **Currency Preservation**: Navigation preserves currency throughout drill-down chain (Dashboard → Country → Campaign → Ad Group).
+    - **Currency Symbols**: Visual indicators display £, $, kr, zł, € symbols in country-specific views via CurrencyBadge component.
+    - **API Support**: All endpoints (`/api/kpis`, `/api/chart-data`, `/api/campaigns`, `/api/search-terms`) support `convertToEur` parameter.
+    - **Multi-Currency Guards**: Backend validates single-currency aggregation when `convertToEur=false` to prevent mixing USD+GBP+etc.
+    - **Exchange Rates**: Uses Frankfurter API (European Central Bank) for daily rates with date-range support.
+    - **Frontend Integration**: Centralized `useSearchParams` hook extracts country query parameter; views conditionally pass `convertToEur=false`.
+    - **URL Parameters**: Country code propagated via `?country=` query parameter; enables currency persistence across drill-down.
 
 ### System Design Choices
 - **Database**: Supabase PostgreSQL with 6 tables across 3 campaign types.
