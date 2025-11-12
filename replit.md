@@ -1,268 +1,69 @@
 # Elan - Amazon PPC Analytics Portal
 
 ## Overview
-Internal analytics portal for Amazon PPC campaigns combining **Sponsored Products**, **Sponsored Brands**, and **Display** campaign data with bid recommendations targeting 20% ACOS.
-
-## Tech Stack
-- **Frontend**: React 18, TypeScript, TailwindCSS, shadcn/ui, Recharts, Wouter
-- **Backend**: Express, Drizzle ORM, PostgreSQL (Supabase)
-- **Database**: Supabase PostgreSQL with 6 tables across 3 campaign types
-
-## Setup Instructions
-
-### 1. Database Setup (Completed ✅)
-Connected to Supabase database successfully using pooler connection.
-
-**Connection String Format:**
-```
-postgresql://postgres.{PROJECT_REF}:{PASSWORD}@aws-1-us-east-1.pooler.supabase.com:6543/postgres
-```
-
-Note: The pooler hostname is required for Replit network access.
-
-### 2. Environment Variables
-Required secrets (configured):
-- `DATABASE_URL` - Supabase pooler connection string
-- `SESSION_SECRET` - Session encryption key
-
-### 3. Running the App
-```bash
-npm run dev
-```
-
-The app will be available on port 5000.
-
-## Features
-
-### Core Features
-- **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Search Terms
-- **Campaign Type Segmentation**: 6-view system - 3 campaign types (Sponsored Products, Sponsored Brands, Display) × 2 views (Search Terms, Placements)
-- **EUR Currency Conversion**: All metrics displayed in EUR using daily ECB exchange rates
-- **Placement Analysis**: Campaign-level placement performance (TOS, ROS, PP, UNKNOWN)
-- **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders
-- **Performance Charts**: Weekly aggregated ACOS and sales trends
-- **Bid Recommendations**: 20% ACOS targeting with confidence levels (shown for ALL search terms)
-- **Negative Keywords**: Auto-detection with ≥20 clicks, $0 sales
-- **Excel Export**: Download negative keywords for bulk upload
-
-### Navigation Structure
-
-**Campaign Level:**
-- View toggle: **Search Terms** | **Placements**
-- Placements view shows campaign-level aggregated data (Sponsored Products only)
-- Search Terms view lists all ad groups in the campaign
-
-**Ad Group Level:**
-- Campaign type selector: **Sponsored Products** | **Sponsored Brands** | **Display**
-- Shows search terms view only (placements are at campaign level)
-- Campaign type selector filters data by campaign type
-
-**Implementation Details:**
-- Campaign-level placements aggregate data across all ad groups
-- Ad Group level accepts `campaignType` parameter for filtering
-- **Critical**: Products campaign type filters by `adGroupId`; Brands and Display do NOT use adGroupId filter (those tables don't have this field)
-- Display campaigns use `targetingText` instead of `searchTerm` and `matchedTargetAsin` instead of `keyword`
-
-### Campaign-Level Placement Bid Adjustments
-Placement bid adjustments are calculated as percentage modifiers (not absolute bids) targeting 20% ACOS:
-
-**Adjustment Logic:**
-- **ACOS ≤ 16%** (well below target): +10% to +20% increase (scales with click volume)
-- **ACOS > 20%** (above target): Formula-based decrease: `(20% / current_acos - 1) × 100`, capped at -50%
-- **ACOS 16-20%**: Small adjustments -10% to +10%
-- **No sales** with ≥30 clicks: -25% decrease
-
-**Confidence Scaling:**
-- 1000+ clicks → +20% adjustment for high performers
-- 300-999 clicks → +15% adjustment
-- 30-299 clicks → +10% adjustment
-- <30 clicks → No recommendation (insufficient data)
-
-### Recommendation Engine
-- **Confidence Levels**:
-  - Extreme: 1000+ clicks
-  - High: 300-999 clicks  
-  - Good: 100-299 clicks
-  - OK: 30-99 clicks
-  - Low: <30 clicks (not shown)
-
-- **Bid Adjustments**:
-  - No sales: -15% to -30% based on CPC
-  - ACOS <16%: +10% to +20% (scale with data)
-  - Standard: ACOS-based optimization
-  - Safeguards: 20%-150% of base bid
-
-### Currency Conversion System
-- **Automatic EUR Conversion**: All sales, costs, and derived metrics displayed in EUR
-- **Daily Exchange Rates**: Uses Frankfurter API (European Central Bank rates)
-- **Supported Currencies**: EUR, USD, GBP, SEK, PLN
-- **Date Handling**: Future dates use latest available rates, historical dates use exact daily rates
-- **Conversion Logic**:
-  1. Query data grouped by country, date, and currency
-  2. Fetch ECB exchange rates for each unique date
-  3. Convert cost/sales to EUR: `eurValue = originalValue × toEurRate`
-  4. Aggregate all countries in EUR
-- **API**: Free Frankfurter API (no API key required, no rate limits)
-
-### Date Range Filtering
-- **Preset Periods**: 7D, 14D, 30D, 60D, 90D buttons for quick selection
-- **Custom Date Picker**: Two-month calendar view for arbitrary date ranges
-- **Dynamic Labels**: Period chip updates to show "Last X days" or custom date range
-- **Auto-Refresh**: All API endpoints automatically refetch when date range changes
-- **Default Period**: 60 days (Last 60 days)
-
-### Navigation
-- Sticky header with branding and export
-- Breadcrumb navigation
-- URL-persisted filters
-- Click-through drilldown tables
-
-## Data Structure
-
-### Brand Tables (Clean Numeric Types)
-
-**1. `s_brand_search_terms` (8,228 rows)**
-- Performance Metrics (numeric types): `clicks`, `cost`, `sales`, `purchases`, `keywordBid`
-- Identifiers: `campaignId`, `adGroupId`, `keywordId` (bigint)
-- Metadata: `searchTerm`, `keywordText`, `matchType`, `campaignBudgetCurrencyCode`, `country`, `date`
-
-**2. `s_brand_placment` (typo in actual table name - 1,394 rows)**
-- Performance Metrics (numeric types): `clicks`, `cost`, `sales`, `purchases`
-- Identifiers: `campaignId`, `campaignName`
-- Metadata: `campaignPlacement` (TOS/ROS/PP/UNKNOWN), `country`, `date`
-
-### Product Tables (TEXT-based Metrics)
-
-**3. `s_products_search_terms` (47,211 rows)**
-- Performance Metrics (TEXT - requires casting):
-  - `clicks`, `cost` (can be used directly as numbers)
-  - `sales7d`, `sales14d`, `purchases7d`, `purchases14d` (TEXT - must cast)
-- Identifiers: `campaignId`, `adGroupId`, `keywordId` (bigint)
-- Metadata: `searchTerm`, `keyword`, `matchType`, `campaignBudgetCurrencyCode`, `country`, `date`
-
-**Important Note:** Product table sales/purchases are TEXT and must be cast:
-```sql
-COALESCE(SUM(NULLIF(sales7d, '')::numeric), 0)
-```
-
-**4. `s_products_placement` (placeholder - use sp_placement_daily_v2)**
-
-### Display Tables
-
-**5. `s_display_matched_target` (Display Search Terms equivalent)**
-- Performance Metrics (numeric types): `clicks`, `cost`, `sales`, `purchases`
-- Identifiers: `campaignId`, `adGroupId`, `keywordId` (bigint)
-- Metadata: `targetingText` (equivalent to searchTerm), `matchedTargetAsin`, `campaignBudgetCurrencyCode`, `country`, `date`
-
-**6. `s_display_targeting` (Display Placements equivalent)**
-- Performance Metrics (numeric types): `clicks`, `cost`, `sales`, `purchases`
-- Identifiers: `campaignId`, `adGroupId`
-- Metadata: `targetingText`, `targetingExpression`, `campaignBudgetCurrencyCode`, `country`, `date`
-
-### Legacy Placements Table
-`sp_placement_daily_v2` (47 columns, 30,231 rows):
-- All metrics are TEXT and require casting
-- Contains historical product placement data
-
-## API Architecture
-
-### Campaign Type Filtering Strategy
-All API endpoints filter by `campaignType` parameter (defaults to 'products'):
-
-**Filtering Logic:**
-- **Sponsored Products**: Queries `s_products_search_terms` and `s_products_placement` tables, filters by `adGroupId`
-- **Sponsored Brands**: Queries `s_brand_search_terms` and `s_brand_placment` tables, NO adGroupId filter (brand tables don't use this field)
-- **Display**: Queries `s_display_matched_target` and `s_display_targeting` tables, NO adGroupId filter (display tables don't use this field)
-
-**Important Implementation Note:**
-The `adGroupId` filter is ONLY applied to Sponsored Products queries. Brands and Display campaign types ignore the adGroupId parameter to avoid filtering out all rows (those tables don't have an adGroupId field that matches the products adGroupId structure).
-
-### Critical Fields in API Responses
-- **Always include calculated fields**: `cpc`, `cvr`, `acos`
-- **Frontend safety**: All numeric renders use null guards: `(val ?? 0).toFixed(2)`
-
-Example response structure:
-```typescript
-{
-  searchTerm: string,
-  clicks: number,
-  cost: number,
-  sales: number,
-  orders: number,
-  acos: number,
-  cpc: number,  // cost / clicks
-  cvr: number,  // (orders / clicks) * 100
-  currentBid: number,
-  recommendedBid: number,
-  currency: string
-}
-```
-
-## Design Guidelines
-- Professional data-focused aesthetic (Linear + Vercel inspired)
-- Dark mode primary with theme toggle
-- Color-coded ACOS badges:
-  - Green: <20%
-  - Amber: 20-30%
-  - Red: >30%
-- Inter font family
-- Responsive grid layouts
-
-## Recent Changes
-- **2025-10-31**: ✅ Completed Amazon-style placement view with all 12 columns and color-coded bid recommendations
-  - **Performance Optimization**: Reduced `/api/campaign-placements` response time from 23+ seconds to ~15 seconds by eliminating nested database queries
-  - **Full 12-Column Implementation**: Placement, Campaign Bidding Strategy, Bid Adjustment, Impressions, Clicks, CTR, Spend, CPC, Orders, Sales, ACOS, Recommended Bid Adjustment
-  - **Enhanced DataTable Component**: Added `cellClassName` property to apply custom styling directly to TableCell for better color-coding support
-  - **Color-Coded Bid Adjustments**: RED for negative adjustments (e.g., -3%), GREEN for positive adjustments (e.g., +15%), muted for no recommendation
-  - **E2E Verified**: Test confirmed red color (rgb(220, 38, 38)) on negative bid adjustments, all 12 columns displayed correctly
-  - Placement bid adjustments calculate percentage modifiers targeting 20% ACOS
-  - Placement adjustments scale with confidence: +20% for 1000+ clicks, +15% for 300-999, +10% for 30-299
-  - Formula-based decreases for ACOS >20%, capped at -50%
-- **2025-10-26**: ✅ Implemented 6-view campaign type segmentation system
-  - Added Display table schemas (s_display_matched_target, s_display_targeting) to shared/schema.ts
-  - Updated AdGroupView.tsx with campaign type selector (Sponsored Products | Sponsored Brands | Display)
-  - Refactored 3 core API endpoints (/api/kpis, /api/search-terms, /api/placements) to filter by campaignType parameter
-  - Fixed adGroupId filtering: Only applies to Products, removed from Brands/Display queries (those tables don't have this field)
-  - Fixed numeric type conversion to prevent .toFixed() errors
-  - Added € currency symbol to all Cost and Sales columns in frontend tables
-  - E2E tested all 6 views (3 campaign types × 2 views) successfully
-- **2025-10-17**: ✅ Implemented functional date range filtering
-  - Added working preset periods (7D, 14D, 30D, 60D, 90D)
-  - Implemented Custom date picker with two-month calendar view
-  - Dynamic period labels update based on selection
-  - All API endpoints automatically refetch data when date range changes
-  - Verified with e2e tests: 30D shows €149k, 90D shows €159k
-- **2025-10-17**: ✅ Implemented EUR currency conversion using daily ECB exchange rates
-  - Created exchange rate utility using Frankfurter API (free, no key required)
-  - Updated all API endpoints (KPIs, countries, chart-data) to convert to EUR
-  - Handles future dates by using latest available rates
-  - All dashboard metrics now displayed in EUR with proper aggregation
-- **2025-10-17**: ✅ Added "Bid Recommendation" column to search terms table
-  - Shows recommended bids for ALL search terms (not just 30+ clicks)
-  - Inline display in main table for easy comparison with current bids
-  - Uses PPC AI logic: increase for ACOS <16%, decrease for ACOS >20%
-- **2025-10-17**: ✅ Fixed CPC/CVR rendering bug - added calculated fields to API response
-- **2025-10-17**: ✅ Added null guards to all toFixed() calls in frontend
-- **2025-10-17**: ✅ E2E tests passing - €157k sales, 22% ACOS (combined brand + product)
-- **2025-10-17**: ✅ Migrated from 2-table to 4-table structure combining brand + product
-- **2025-10-17**: ✅ Rewrote all API routes using UNION queries for combined data
-- 2025-10-14: ✅ Integrated sp_placement_daily_v2 table (30k+ rows)
-- 2025-10-14: ✅ Successfully connected to Supabase database using pooler
-- 2025-10-11: Implemented bid recommendation engine
-- 2025-10-11: Integrated Excel export for negatives
-
-## Known Issues & Limitations
-- Timezone normalization assumes UTC (monitor for drift if deploying outside UTC)
-- Some placement rows show "UNKNOWN" type (actual placement type may need mapping)
-- Table name typo: `s_brand_placment` (missing 'e' in placement) - actual database name
+Elan is an internal analytics portal designed to centralize and analyze Amazon PPC campaign data (Sponsored Products, Sponsored Brands, Display). Its primary purpose is to provide multi-level drilldown capabilities, KPI tracking, and bid recommendations targeting a 20% ACOS to optimize campaign performance and drive sales growth. The system supports multi-currency display with EUR conversion and offers tools for negative keyword detection and export.
 
 ## User Preferences
 - Prefer data-first over decorative UI
 - M19.com-inspired clean design
 - Professional color scheme
 
-## Data Volume Summary
-- **Brand Search Terms**: 8,228 rows
-- **Brand Placements**: 1,394 rows
-- **Product Search Terms**: 47,211 rows
-- **Total Combined**: €167,833 sales across 10 countries
+## System Architecture
+
+### UI/UX Decisions
+- Professional, data-focused aesthetic (Linear + Vercel inspired).
+- Dark mode primary with theme toggle.
+- Color-coded ACOS badges: Green (<20%), Amber (20-30%), Red (>30%).
+- Inter font family.
+- Responsive grid layouts.
+- Sticky header with branding and export functionality.
+- Breadcrumb navigation and URL-persisted filters.
+- Click-through drilldown tables for navigation.
+
+### Technical Implementations
+- **Frontend**: React 18, TypeScript, TailwindCSS, shadcn/ui, Recharts, Wouter.
+- **Backend**: Express, Drizzle ORM, PostgreSQL (Supabase).
+- **Core Features**:
+    - **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Search Terms.
+    - **Campaign Type Segmentation**: 6-view system (3 campaign types × 2 views: Search Terms, Placements).
+    - **EUR Currency Conversion**: All metrics displayed in EUR using daily ECB exchange rates; country-specific views show local currency.
+    - **Placement Analysis**: Campaign-level performance by placement type (TOS, ROS, PP, UNKNOWN).
+    - **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders.
+    - **Performance Charts**: Weekly aggregated ACOS and sales trends.
+    - **Bid Recommendations**: 20% ACOS targeting for all search terms with confidence levels.
+    - **Negative Keywords**: Auto-detection (≥20 clicks, $0 sales) with Excel export.
+    - **Date Range Filtering**: Preset periods (7D, 14D, 30D, 60D, 90D) and custom date picker with auto-refresh.
+
+### Feature Specifications
+- **Campaign-Level Placement Bid Adjustments**: Percentage modifiers (not absolute bids) targeting 20% ACOS, scaled by click volume (confidence).
+    - ACOS ≤ 16%: +10% to +20% increase.
+    - ACOS > 20%: Formula-based decrease, capped at -50%.
+    - ACOS 16-20%: Small adjustments (-10% to +10%).
+    - No sales (≥30 clicks): -25% decrease.
+- **Recommendation Engine**: Provides bid adjustments based on ACOS and sales data, with safeguards (20%-150% of base bid). Confidence levels (Extreme, High, Good, OK) are based on click volume.
+- **Currency Conversion System**:
+    - Multi-currency display (EUR for dashboard, local for countries).
+    - Navigation preserves currency preference.
+    - Uses Frankfurter API for daily ECB exchange rates.
+    - Backend API (`/api/kpis`) supports `convertToEur` parameter.
+    - Frontend handles country code via query parameters.
+
+### System Design Choices
+- **Database**: Supabase PostgreSQL with 6 tables across 3 campaign types.
+- **Data Structure**:
+    - Separate tables for Brand, Product, and Display campaigns.
+    - Brand tables (`s_brand_search_terms`, `s_brand_placment`) have numeric metrics.
+    - Product tables (`s_products_search_terms`, `s_products_placement` - placeholder) have TEXT-based sales/purchases requiring casting.
+    - Display tables (`s_display_matched_target`, `s_display_targeting`) have numeric metrics.
+    - `s_brand_placment` contains a typo in the table name.
+    - `s_products_placement` uses `sp_placement_daily_v2` for historical data.
+    - Display campaigns use `targetingText` instead of `searchTerm` and `matchedTargetAsin` instead of `keyword`.
+- **API Architecture**:
+    - All API endpoints filter by `campaignType` (defaults to 'products').
+    - `adGroupId` filter is applied ONLY to Sponsored Products; ignored for Sponsored Brands and Display campaigns as they lack this field in a compatible structure.
+    - API responses include calculated fields: `cpc`, `cvr`, `acos`.
+    - Frontend renders use null guards for numeric values: `(val ?? 0).toFixed(2)`.
+
+## External Dependencies
+- **Database**: Supabase (PostgreSQL).
+- **Exchange Rates API**: Frankfurter API (European Central Bank rates).
