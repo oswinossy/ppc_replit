@@ -158,7 +158,7 @@ export default function CountryView() {
               ]}
               data={campaigns}
               onRowClick={(row) => {
-                setLocation(`/campaign/${row.id}`);
+                setLocation(`/campaign/${row.id}?country=${countryCode}`);
               }}
             />
           ) : null}
