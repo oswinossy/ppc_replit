@@ -9,7 +9,7 @@ import RecommendationCard from "@/components/RecommendationCard";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Download, Sparkles } from "lucide-react";
-import { useRoute } from "wouter";
+import { useRoute, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -19,14 +19,20 @@ import { useToast } from "@/hooks/use-toast";
 
 export default function AdGroupView() {
   const [, params] = useRoute("/ad-group/:id");
+  const [location] = useLocation();
   const adGroupId = params?.id || "";
+  
+  // Extract country from query parameters
+  const searchParams = new URLSearchParams(location.split('?')[1] || '');
+  const countryCode = searchParams.get('country');
+  
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
   const [campaignType, setCampaignType] = useState<'products' | 'brands' | 'display'>('products');
   const [showRecommendations, setShowRecommendations] = useState(false);
   const { toast } = useToast();
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
-    queryKey: ['/api/kpis', adGroupId, campaignType, dateRange],
+    queryKey: ['/api/kpis', adGroupId, campaignType, countryCode, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         adGroupId,
@@ -34,13 +40,18 @@ export default function AdGroupView() {
         from: dateRange.from, 
         to: dateRange.to 
       });
+      // When country is present, display in local currency
+      if (countryCode) {
+        params.append('country', countryCode);
+        params.append('convertToEur', 'false');
+      }
       const response = await fetch(`/api/kpis?${params}`);
       return response.json();
     },
   });
 
   const { data: searchTerms, isLoading: searchTermsLoading } = useQuery({
-    queryKey: ['/api/search-terms', adGroupId, campaignType, dateRange],
+    queryKey: ['/api/search-terms', adGroupId, campaignType, countryCode, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         adGroupId,
@@ -48,6 +59,10 @@ export default function AdGroupView() {
         from: dateRange.from, 
         to: dateRange.to 
       });
+      // Pass country parameter for future convertToEur support
+      if (countryCode) {
+        params.append('country', countryCode);
+      }
       const response = await fetch(`/api/search-terms?${params}`);
       return response.json();
     },
