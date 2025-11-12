@@ -6,6 +6,7 @@ import BreadcrumbNav from "@/components/BreadcrumbNav";
 import FilterChip from "@/components/FilterChip";
 import ThemeToggle from "@/components/ThemeToggle";
 import ACOSBadge from "@/components/ACOSBadge";
+import CurrencyBadge from "@/components/CurrencyBadge";
 import { Button } from "@/components/ui/button";
 import { Download, TrendingUp } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
@@ -39,7 +40,8 @@ export default function CountryView() {
       const params = new URLSearchParams({ 
         country: countryCode,
         from: dateRange.from, 
-        to: dateRange.to 
+        to: dateRange.to,
+        convertToEur: 'false' // Display in local currency for country-specific views
       });
       const response = await fetch(`/api/campaigns?${params}`);
       return response.json();
@@ -53,7 +55,8 @@ export default function CountryView() {
         country: countryCode,
         from: dateRange.from, 
         to: dateRange.to,
-        grain: 'weekly'
+        grain: 'weekly',
+        convertToEur: 'false' // Display in local currency for country-specific views
       });
       const response = await fetch(`/api/chart-data?${params}`);
       return response.json();
@@ -88,6 +91,7 @@ export default function CountryView() {
               { label: "Dashboard", href: "/" },
               { label: countryCode }
             ]} />
+            <CurrencyBadge countryCode={countryCode} />
           </div>
           <div className="flex items-center gap-4">
             <Button 

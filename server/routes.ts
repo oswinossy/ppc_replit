@@ -5,7 +5,7 @@ import { brandSearchTerms, brandPlacement, productSearchTerms, productPlacement,
 import { sql, eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR, calculateROAS, getConfidenceLevel } from "./utils/calculations";
 import { generateBidRecommendation, detectNegativeKeywords } from "./utils/recommendations";
-import { getExchangeRatesForDate, convertToEur } from "./utils/exchangeRates";
+import { getExchangeRatesForDate, getExchangeRatesForRange, convertToEur } from "./utils/exchangeRates";
 import * as XLSX from 'xlsx';
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -292,7 +292,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Campaigns by country endpoint - combines brand + product
   app.get("/api/campaigns", async (req, res) => {
     try {
-      const { country, from, to } = req.query;
+      const { country, from, to, convertToEur: convertToEurParam = 'true' } = req.query;
+      const convertToEur = convertToEurParam === 'true';
       
       // Query brand campaigns
       const brandConditions = [];
@@ -380,6 +381,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           acos: calculateACOS(row.cost, row.sales),
         }))
         .sort((a, b) => b.sales - a.sales);
+
+      // Multi-currency guard: prevent mixing currencies when not converting to EUR
+      if (!convertToEur && campaigns.length > 0) {
+        const currencies = new Set(campaigns.map(row => row.currency).filter(Boolean));
+        if (currencies.size > 1) {
+          return res.status(400).json({ 
+            error: 'Cannot aggregate campaigns from multiple currencies without EUR conversion',
+            currencies: Array.from(currencies),
+            hint: 'Add convertToEur=true parameter or filter by a single country'
+          });
+        }
+      }
 
       res.json(campaigns);
     } catch (error) {
@@ -490,7 +503,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Search terms by ad group endpoint - filters by campaign type
   app.get("/api/search-terms", async (req, res) => {
     try {
-      const { adGroupId, campaignType = 'products', from, to } = req.query;
+      const { adGroupId, campaignType = 'products', from, to, convertToEur: convertToEurParam = 'true' } = req.query;
+      const convertToEur = convertToEurParam === 'true';
       
       let results: Array<{
         searchTerm: string | null;
@@ -635,6 +649,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           };
         })
         .sort((a, b) => b.clicks - a.clicks);
+
+      // Multi-currency guard: prevent mixing currencies when not converting to EUR
+      if (!convertToEur && searchTerms.length > 0) {
+        const currencies = new Set(searchTerms.map(row => row.currency).filter(Boolean));
+        if (currencies.size > 1) {
+          return res.status(400).json({ 
+            error: 'Cannot aggregate data from multiple currencies without EUR conversion',
+            currencies: Array.from(currencies),
+            hint: 'Add convertToEur=true parameter or filter by a single country'
+          });
+        }
+      }
 
       res.json(searchTerms);
     } catch (error) {
@@ -882,7 +908,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Chart data endpoint with aggregation - combines brand + product
   app.get("/api/chart-data", async (req, res) => {
     try {
-      const { country, campaignId, from, to, groupBy = 'daily' } = req.query;
+      const { country, campaignId, from, to, groupBy = 'daily', convertToEur: convertToEurParam = 'true' } = req.query;
+      const convertToEur = convertToEurParam === 'true';
       
       // Build brand conditions
       const brandConditions = [];
@@ -914,10 +941,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           date: sql<string>`${dateGroup}::text`,
           cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+          currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
+          country: sql<string>`MAX(${brandSearchTerms.country})`,
         })
         .from(brandSearchTerms)
         .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
-        .groupBy(sql`${dateGroup}`)
+        .groupBy(sql`${dateGroup}`, brandSearchTerms.campaignBudgetCurrencyCode)
         .orderBy(asc(sql`${dateGroup}`));
 
       // Query product data
@@ -935,26 +964,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
           date: sql<string>`${productDateGroup}::text`,
           cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
+          country: sql<string>`MAX(${productSearchTerms.country})`,
         })
         .from(productSearchTerms)
         .where(productConditions.length > 0 ? and(...productConditions) : undefined)
-        .groupBy(sql`${productDateGroup}`)
+        .groupBy(sql`${productDateGroup}`, productSearchTerms.campaignBudgetCurrencyCode)
         .orderBy(asc(sql`${productDateGroup}`));
 
-      // Combine by date
-      const dateMap = new Map();
+      // Combine by date and currency
+      const combinedResults = [...brandResults, ...productResults];
       
-      brandResults.forEach(row => {
-        const date = row.date.split('T')[0]; // Extract date part
-        dateMap.set(date, {
-          date,
-          cost: Number(row.cost),
-          sales: Number(row.sales),
-        });
-      });
+      // Multi-currency guard: prevent mixing currencies when not converting to EUR
+      if (!convertToEur && combinedResults.length > 0) {
+        const currencies = new Set(combinedResults.map(row => row.currency).filter(Boolean));
+        if (currencies.size > 1) {
+          return res.status(400).json({ 
+            error: 'Cannot aggregate chart data from multiple currencies without EUR conversion',
+            currencies: Array.from(currencies),
+            hint: 'Add convertToEur=true parameter or filter by a single country'
+          });
+        }
+      }
 
-      productResults.forEach(row => {
-        const date = row.date.split('T')[0]; // Extract date part
+      // Convert to EUR if requested
+      if (convertToEur && combinedResults.length > 0 && from && to) {
+        const ratesMap = await getExchangeRatesForRange(from as string, to as string);
+        
+        // Convert each row to EUR
+        combinedResults.forEach(row => {
+          const date = row.date.split('T')[0];
+          const rates = ratesMap.get(date);
+          if (rates && row.currency) {
+            const toEurRate = rates[row.currency as keyof typeof rates];
+            if (toEurRate) {
+              row.cost = row.cost * toEurRate;
+              row.sales = row.sales * toEurRate;
+              row.currency = 'EUR';
+            }
+          }
+        });
+      }
+
+      // Aggregate by date
+      const dateMap = new Map<string, { date: string; cost: number; sales: number; currency: string | null }>();
+      
+      combinedResults.forEach(row => {
+        const date = row.date.split('T')[0];
         const existing = dateMap.get(date);
         if (existing) {
           existing.cost += Number(row.cost);
@@ -964,6 +1020,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             date,
             cost: Number(row.cost),
             sales: Number(row.sales),
+            currency: row.currency,
           });
         }
       });
@@ -973,6 +1030,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           date: row.date,
           acos: calculateACOS(row.cost, row.sales),
           sales: row.sales,
+          currency: row.currency,
         }))
         .sort((a, b) => a.date.localeCompare(b.date));
 

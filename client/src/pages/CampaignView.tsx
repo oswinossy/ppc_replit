@@ -6,6 +6,7 @@ import BreadcrumbNav from "@/components/BreadcrumbNav";
 import FilterChip from "@/components/FilterChip";
 import ThemeToggle from "@/components/ThemeToggle";
 import ACOSBadge from "@/components/ACOSBadge";
+import CurrencyBadge from "@/components/CurrencyBadge";
 import { Button } from "@/components/ui/button";
 import { Download, TrendingUp } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
@@ -13,6 +14,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { useSearchParams } from "@/hooks/useSearchParams";
 
 type ViewMode = 'search-terms' | 'placements';
 
@@ -21,9 +23,8 @@ export default function CampaignView() {
   const [, setLocation] = useLocation();
   const campaignId = params?.id || "";
   
-  // Extract country from query parameters (use window.location.search since wouter location only has pathname)
-  const searchParams = new URLSearchParams(window.location.search);
-  const countryCode = searchParams.get('country');
+  // Extract country from query parameters
+  const { country: countryCode } = useSearchParams();
   
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
   const [viewMode, setViewMode] = useState<ViewMode>('search-terms');
@@ -73,8 +74,8 @@ export default function CampaignView() {
     },
   });
 
-  const { data: chartData, isLoading: chartLoading } = useQuery({
-    queryKey: ['/api/chart-data', campaignId, dateRange],
+  const { data: chartData, isLoading: chartLoading} = useQuery({
+    queryKey: ['/api/chart-data', campaignId, countryCode, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
@@ -82,6 +83,11 @@ export default function CampaignView() {
         to: dateRange.to,
         grain: 'weekly'
       });
+      // When country is present, display in local currency
+      if (countryCode) {
+        params.append('country', countryCode);
+        params.append('convertToEur', 'false');
+      }
       const response = await fetch(`/api/chart-data?${params}`);
       return response.json();
     },
@@ -115,6 +121,7 @@ export default function CampaignView() {
               { label: "Dashboard", href: "/" },
               { label: "Campaign" }
             ]} />
+            <CurrencyBadge countryCode={countryCode} />
           </div>
           <div className="flex items-center gap-4">
             <Button 
