@@ -18,19 +18,29 @@ type ViewMode = 'search-terms' | 'placements';
 
 export default function CampaignView() {
   const [, params] = useRoute("/campaign/:id");
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const campaignId = params?.id || "";
+  
+  // Extract country from query parameters
+  const searchParams = new URLSearchParams(location.split('?')[1] || '');
+  const countryCode = searchParams.get('country');
+  
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
   const [viewMode, setViewMode] = useState<ViewMode>('search-terms');
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
-    queryKey: ['/api/kpis', campaignId, dateRange],
+    queryKey: ['/api/kpis', campaignId, countryCode, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
         from: dateRange.from, 
         to: dateRange.to 
       });
+      // When country is present, display in local currency
+      if (countryCode) {
+        params.append('country', countryCode);
+        params.append('convertToEur', 'false');
+      }
       const response = await fetch(`/api/kpis?${params}`);
       return response.json();
     },
@@ -199,7 +209,10 @@ export default function CampaignView() {
                 ]}
                 data={adGroups}
                 onRowClick={(row) => {
-                  setLocation(`/ad-group/${row.id}`);
+                  const url = countryCode 
+                    ? `/ad-group/${row.id}?country=${countryCode}`
+                    : `/ad-group/${row.id}`;
+                  setLocation(url);
                 }}
               />
             ) : null}
