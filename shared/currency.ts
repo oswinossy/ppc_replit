@@ -70,3 +70,21 @@ export const COUNTRY_TO_CURRENCY: Record<string, SupportedCurrency> = {
 export function getCurrencyForCountry(countryCode: string): SupportedCurrency {
   return COUNTRY_TO_CURRENCY[countryCode.toUpperCase()] || 'EUR';
 }
+
+/**
+ * Normalize Amazon placement names to match Amazon UI terminology
+ * Maps database placement values to user-friendly names
+ */
+export function normalizePlacementName(placement: string | null): string {
+  if (!placement) return 'Unknown';
+  
+  const normalizedMap: Record<string, string> = {
+    'Top of Search on-Amazon': 'Top of search (first page)',
+    'Detail Page on-Amazon': 'Product pages',
+    'Other on-Amazon': 'Rest of search',
+    'Off Amazon': 'Off Amazon',
+    'UNKNOWN': 'Unknown',
+  };
+  
+  return normalizedMap[placement] || placement;
+}

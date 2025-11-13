@@ -6,6 +6,7 @@ import { sql, eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR, calculateROAS, getConfidenceLevel } from "./utils/calculations";
 import { generateBidRecommendation, detectNegativeKeywords } from "./utils/recommendations";
 import { getExchangeRatesForDate, getExchangeRatesForRange, convertToEur } from "./utils/exchangeRates";
+import { normalizePlacementName } from "@shared/currency";
 import * as XLSX from 'xlsx';
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -723,7 +724,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         results = await db
           .select({
-            placement: productPlacement.campaignPlacement,
+            placement: productPlacement.placementClassification,
             clicks: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.clicks}, '')::numeric), 0)`,
             cost: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.cost}, '')::numeric), 0)`,
             sales: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.sales7d}, '')::numeric), 0)`,
@@ -731,13 +732,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
           .from(productPlacement)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .groupBy(productPlacement.campaignPlacement);
+          .groupBy(productPlacement.placementClassification);
       }
 
       const placements = results
         .filter(row => row.placement)
         .map(row => ({
-          placement: row.placement || 'UNKNOWN',
+          placement: normalizePlacementName(row.placement),
           clicks: Number(row.clicks),
           cost: Number(row.cost),
           sales: Number(row.sales),
@@ -767,7 +768,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const allResults = await db
         .select({
-          placement: productPlacement.campaignPlacement,
+          placement: productPlacement.placementClassification,
           biddingStrategy: productPlacement.campaignBiddingStrategy,
           date: productPlacement.date,
           country: productPlacement.country,
@@ -874,7 +875,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         recommendedBidAdjustment = Math.round(recommendedBidAdjustment);
 
         return {
-          placement: group.placement,
+          placement: normalizePlacementName(group.placement),
           biddingStrategy: group.biddingStrategy,
           bidAdjustment: null, // Current bid adjustment from Amazon (not in our data yet)
           impressions: group.totalImpressions,

@@ -57,11 +57,12 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
 - **Data Structure**:
     - Separate tables for Brand, Product, and Display campaigns.
     - Brand tables (`s_brand_search_terms`, `s_brand_placment`) have numeric metrics.
-    - Product tables (`s_products_search_terms`, `s_products_placement` - placeholder) have TEXT-based sales/purchases requiring casting.
+    - Product tables (`s_products_search_terms`, `s_products_placement`) have TEXT-based sales/purchases requiring casting.
     - Display tables (`s_display_matched_target`, `s_display_targeting`) have numeric metrics.
     - `s_brand_placment` contains a typo in the table name.
-    - `s_products_placement` uses `sp_placement_daily_v2` for historical data.
+    - `s_products_placement` contains `placementClassification` column with Amazon placement types.
     - Display campaigns use `targetingText` instead of `searchTerm` and `matchedTargetAsin` instead of `keyword`.
+    - **Placement Classification**: Database stores raw values ("Top of Search on-Amazon", "Detail Page on-Amazon", "Other on-Amazon", "Off Amazon") which are normalized to Amazon UI terminology ("Top of search (first page)", "Product pages", "Rest of search", "Off Amazon") via `normalizePlacementName()` helper.
 - **API Architecture**:
     - All API endpoints filter by `campaignType` (defaults to 'products').
     - `adGroupId` filter is applied ONLY to Sponsored Products; ignored for Sponsored Brands and Display campaigns as they lack this field in a compatible structure.

@@ -167,6 +167,7 @@ export const productPlacement = pgTable("s_products_placement", {
   date: text("date"),
   retailer: text("retailer"),
   campaignPlacement: text("campaignPlacement"),
+  placementClassification: text("placementClassification"),
   
   // All metrics are TEXT - require casting
   impressions: text("impressions"),
