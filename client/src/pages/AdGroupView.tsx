@@ -48,6 +48,7 @@ export default function AdGroupView() {
       const response = await fetch(`/api/kpis?${params}`);
       return response.json();
     },
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const { data: searchTerms, isLoading: searchTermsLoading, error: searchTermsError } = useQuery({
@@ -89,6 +90,7 @@ export default function AdGroupView() {
       
       return response.json();
     },
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
 

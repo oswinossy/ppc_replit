@@ -45,6 +45,7 @@ export default function CampaignView() {
       const response = await fetch(`/api/kpis?${params}`);
       return response.json();
     },
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const { data: adGroups, isLoading: adGroupsLoading } = useQuery({
@@ -58,6 +59,7 @@ export default function CampaignView() {
       const response = await fetch(`/api/ad-groups?${params}`);
       return response.json();
     },
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const { data: placements, isLoading: placementsLoading } = useQuery({
@@ -72,6 +74,7 @@ export default function CampaignView() {
       const response = await fetch(`/api/campaign-placements?${params}`);
       return response.json();
     },
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const { data: chartData, isLoading: chartLoading} = useQuery({
@@ -91,6 +94,7 @@ export default function CampaignView() {
       const response = await fetch(`/api/chart-data?${params}`);
       return response.json();
     },
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const handleExportNegatives = async () => {

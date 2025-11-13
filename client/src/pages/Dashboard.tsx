@@ -29,6 +29,7 @@ export default function Dashboard() {
       return data;
     },
     enabled: !!dateRange,
+    refetchInterval: 3600000, // Auto-refresh every hour (3600000ms = 1 hour)
   });
 
   const { data: countries, isLoading: countriesLoading, error: countriesError } = useQuery({
@@ -42,6 +43,7 @@ export default function Dashboard() {
       return data;
     },
     enabled: !!dateRange,
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const { data: chartData, isLoading: chartLoading, error: chartError } = useQuery({
@@ -59,6 +61,7 @@ export default function Dashboard() {
       return data;
     },
     enabled: !!dateRange,
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const handleExportNegatives = async () => {

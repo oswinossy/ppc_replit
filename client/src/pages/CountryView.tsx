@@ -32,6 +32,7 @@ export default function CountryView() {
       const response = await fetch(`/api/kpis?${params}`);
       return response.json();
     },
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const { data: campaigns, isLoading: campaignsLoading } = useQuery({
@@ -46,6 +47,7 @@ export default function CountryView() {
       const response = await fetch(`/api/campaigns?${params}`);
       return response.json();
     },
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const { data: chartData, isLoading: chartLoading } = useQuery({
@@ -61,6 +63,7 @@ export default function CountryView() {
       const response = await fetch(`/api/chart-data?${params}`);
       return response.json();
     },
+    refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const handleExportNegatives = async () => {
