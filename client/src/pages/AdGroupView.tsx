@@ -50,7 +50,7 @@ export default function AdGroupView() {
     },
   });
 
-  const { data: searchTerms, isLoading: searchTermsLoading } = useQuery({
+  const { data: searchTerms, isLoading: searchTermsLoading, error: searchTermsError } = useQuery({
     queryKey: ['/api/search-terms', adGroupId, campaignType, countryCode, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
@@ -65,6 +65,28 @@ export default function AdGroupView() {
         params.append('convertToEur', 'false');
       }
       const response = await fetch(`/api/search-terms?${params}`);
+      
+      // If error (e.g., multi-currency issue), retry with EUR conversion
+      if (!response.ok) {
+        const errorData = await response.json();
+        if (errorData.error?.includes('multiple currencies')) {
+          // Retry without country filter to get EUR-converted data
+          const retryParams = new URLSearchParams({ 
+            adGroupId,
+            campaignType,
+            from: dateRange.from, 
+            to: dateRange.to,
+            convertToEur: 'true'
+          });
+          const retryResponse = await fetch(`/api/search-terms?${retryParams}`);
+          if (!retryResponse.ok) {
+            throw new Error('Failed to fetch search terms');
+          }
+          return retryResponse.json();
+        }
+        throw new Error(errorData.error || 'Failed to fetch search terms');
+      }
+      
       return response.json();
     },
   });
