@@ -90,15 +90,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let resultCurrency = 'EUR';
 
       if (shouldConvertToEur) {
-        // Get unique dates for exchange rate fetching
-        const uniqueDates = new Set<string>();
-        results.forEach(row => row.date && uniqueDates.add(row.date));
+        // Get date range for exchange rate fetching
+        const dates = results.map(row => row.date).filter(Boolean);
+        const minDate = dates.length > 0 ? dates.reduce((a, b) => a < b ? a : b) : null;
+        const maxDate = dates.length > 0 ? dates.reduce((a, b) => a > b ? a : b) : null;
 
-        // Fetch exchange rates for each unique date
-        const exchangeRatesCache = new Map<string, Record<string, number>>();
-        for (const date of Array.from(uniqueDates)) {
-          const rates = await getExchangeRatesForDate(date);
-          exchangeRatesCache.set(date, rates);
+        // Fetch exchange rates for entire date range with single API call
+        let exchangeRatesCache = new Map<string, Record<string, number>>();
+        if (minDate && maxDate) {
+          exchangeRatesCache = await getExchangeRatesForRange(minDate, maxDate);
         }
 
         // Convert to EUR and aggregate
@@ -198,16 +198,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(productConditions.length > 0 ? and(...productConditions) : undefined)
         .groupBy(productSearchTerms.country, productSearchTerms.date, productSearchTerms.campaignBudgetCurrencyCode);
 
-      // Get unique dates for exchange rate fetching
-      const uniqueDates = new Set<string>();
-      brandResults.forEach(row => row.date && uniqueDates.add(row.date));
-      productResults.forEach(row => row.date && uniqueDates.add(row.date));
+      // Get date range for exchange rate fetching
+      const allDates = [
+        ...brandResults.map(row => row.date),
+        ...productResults.map(row => row.date)
+      ].filter((d): d is string => Boolean(d));
+      const minDate = allDates.length > 0 ? allDates.reduce((a, b) => a < b ? a : b) : null;
+      const maxDate = allDates.length > 0 ? allDates.reduce((a, b) => a > b ? a : b) : null;
 
-      // Fetch exchange rates for each unique date
-      const exchangeRatesCache = new Map<string, Record<string, number>>();
-      for (const date of Array.from(uniqueDates)) {
-        const rates = await getExchangeRatesForDate(date);
-        exchangeRatesCache.set(date, rates);
+      // Fetch exchange rates for entire date range with single API call
+      let exchangeRatesCache = new Map<string, Record<string, number>>();
+      if (minDate && maxDate) {
+        exchangeRatesCache = await getExchangeRatesForRange(minDate, maxDate);
       }
 
       // Combine and convert to EUR
@@ -772,6 +774,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           biddingStrategy: productPlacement.campaignBiddingStrategy,
           date: productPlacement.date,
           country: productPlacement.country,
+          currency: productPlacement.campaignBudgetCurrencyCode,
           impressions: sql<string>`NULLIF(${productPlacement.impressions}, '')`,
           clicks: sql<string>`NULLIF(${productPlacement.clicks}, '')`,
           cost: sql<string>`NULLIF(${productPlacement.cost}, '')`,
@@ -781,12 +784,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(productPlacement)
         .where(conditions.length > 0 ? and(...conditions) : undefined);
 
-      // Get unique dates for exchange rates (fetch all at once)
-      const uniqueDates = Array.from(new Set(allResults.map(r => r.date).filter(d => d !== null))) as string[];
-      const exchangeRatesMap = new Map();
-      for (const date of uniqueDates) {
-        const rates = await getExchangeRatesForDate(date);
-        exchangeRatesMap.set(date, rates);
+      // Get date range for exchange rates (fetch all at once with single API call)
+      const allDates = allResults.map(r => r.date).filter(Boolean);
+      const minDate = allDates.length > 0 ? allDates.reduce((a, b) => a! < b! ? a : b) : null;
+      const maxDate = allDates.length > 0 ? allDates.reduce((a, b) => a! > b! ? a : b) : null;
+      
+      let exchangeRatesMap = new Map<string, Record<string, number>>();
+      if (minDate && maxDate) {
+        exchangeRatesMap = await getExchangeRatesForRange(minDate, maxDate);
       }
 
       // Group and aggregate data in memory
@@ -817,8 +822,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const group = placementGroups.get(key)!;
-        const rates = exchangeRatesMap.get(row.date) || {};
-        const country = row.country as string;
+        const rates = exchangeRatesMap.get(row.date || '') || {};
 
         // Convert to EUR and aggregate
         const impressions = Number(row.impressions || 0);
@@ -827,8 +831,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const sales = Number(row.sales || 0);
         const orders = Number(row.purchases || 0);
 
-        const costEur = convertToEur(cost, country, rates);
-        const salesEur = convertToEur(sales, country, rates);
+        const costEur = convertToEur(cost, row.currency || 'EUR', rates);
+        const salesEur = convertToEur(sales, row.currency || 'EUR', rates);
 
         group.totalImpressions += impressions;
         group.totalClicks += clicks;
