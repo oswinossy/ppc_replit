@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, numeric, timestamp, bigint, doublePrecision, date as pgDate, varchar, jsonb, char } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, timestamp, bigint, doublePrecision, date as pgDate, varchar, jsonb, char, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -41,7 +41,11 @@ export const brandSearchTerms = pgTable('s_brand_search_terms', {
   rawPayload: jsonb("raw_payload"),
   ingestedAt: timestamp("ingested_at"),
   country: text("country"),
-});
+}, (table) => ({
+  // Performance indexes for common query patterns
+  dateCountryIdx: index("brand_search_terms_date_country_idx").on(table.date, table.country),
+  dateCampaignIdx: index("brand_search_terms_date_campaign_idx").on(table.date, table.campaignId),
+}));
 
 // Brand Placement table - clean numeric types
 export const brandPlacement = pgTable('s_brand_placment', {
@@ -159,7 +163,12 @@ export const productSearchTerms = pgTable('s_products_search_terms', {
   retailer: text("retailer"),
   createdAt: timestamp("createdAt"),
   country: text("country"),
-});
+}, (table) => ({
+  // Performance indexes for common query patterns
+  dateCountryIdx: index("product_search_terms_date_country_idx").on(table.date, table.country),
+  dateCampaignIdx: index("product_search_terms_date_campaign_idx").on(table.date, table.campaignId),
+  dateAdGroupIdx: index("product_search_terms_date_adgroup_idx").on(table.date, table.adGroupId),
+}));
 
 // Product Placement table - TEXT columns (legacy structure)
 export const productPlacement = pgTable("s_products_placement", {
@@ -322,7 +331,11 @@ export const displayMatchedTarget = pgTable('s_display_matched_target', {
   addToCartRate: numeric("addToCartRate"),
   
   created_at: timestamp("created_at"),
-});
+}, (table) => ({
+  // Performance indexes for common query patterns
+  dateCountryIdx: index("display_matched_target_date_country_idx").on(table.date, table.country),
+  dateCampaignIdx: index("display_matched_target_date_campaign_idx").on(table.date, table.campaignId),
+}));
 
 // Display Targeting table - clean numeric types (equivalent to "Placements" for Display)
 export const displayTargeting = pgTable('s_display_targeting', {

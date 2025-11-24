@@ -24,6 +24,12 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
 ### Technical Implementations
 - **Frontend**: React 18, TypeScript, TailwindCSS, shadcn/ui, Recharts, Wouter.
 - **Backend**: Express, Drizzle ORM, PostgreSQL (Supabase).
+- **Performance Optimizations**:
+    - **Frontend**: DateRange auto-initializes to last 60 days on mount to trigger immediate data loading
+    - **API Response Caching**: 2-minute TTL in-memory cache for /api/kpis, /api/countries, /api/chart-data endpoints
+    - **Exchange Rate Caching**: 5-minute TTL for Frankfurter API responses
+    - **Database Indexes**: Composite indexes on (date, country, campaignId) for all fact tables (brand_search_terms, product_search_terms, display_matched_target)
+    - **Performance Results**: First load ~1.3-1.6s (down from 4-5s), cached loads ~395ms
 - **Core Features**:
     - **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Search Terms.
     - **Campaign Type Segmentation**: Dashboard-level filter allows switching between Sponsored Products, Sponsored Brands, and Display to analyze performance by campaign type.
