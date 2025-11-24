@@ -7,6 +7,7 @@ import FilterChip from "@/components/FilterChip";
 import ThemeToggle from "@/components/ThemeToggle";
 import ACOSBadge from "@/components/ACOSBadge";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Download, TrendingUp } from "lucide-react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -17,12 +18,17 @@ import { format, subDays, differenceInDays, parseISO } from "date-fns";
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const [dateRange, setDateRange] = useState<{ from: string; to: string } | null>(null);
+  const [campaignType, setCampaignType] = useState<'products' | 'brands' | 'display'>('products');
 
   const { data: kpis, isLoading: kpisLoading, error: kpisError } = useQuery({
-    queryKey: ['/api/kpis', dateRange],
+    queryKey: ['/api/kpis', dateRange, campaignType],
     queryFn: async () => {
       if (!dateRange) return null;
-      const params = new URLSearchParams({ from: dateRange.from, to: dateRange.to });
+      const params = new URLSearchParams({ 
+        from: dateRange.from, 
+        to: dateRange.to,
+        campaignType 
+      });
       const response = await fetch(`/api/kpis?${params}`);
       const data = await response.json();
       if (data.error) throw new Error(data.error);
@@ -33,10 +39,14 @@ export default function Dashboard() {
   });
 
   const { data: countries, isLoading: countriesLoading, error: countriesError } = useQuery({
-    queryKey: ['/api/countries', dateRange],
+    queryKey: ['/api/countries', dateRange, campaignType],
     queryFn: async () => {
       if (!dateRange) return null;
-      const params = new URLSearchParams({ from: dateRange.from, to: dateRange.to });
+      const params = new URLSearchParams({ 
+        from: dateRange.from, 
+        to: dateRange.to,
+        campaignType 
+      });
       const response = await fetch(`/api/countries?${params}`);
       const data = await response.json();
       if (data.error) throw new Error(data.error);
@@ -47,13 +57,14 @@ export default function Dashboard() {
   });
 
   const { data: chartData, isLoading: chartLoading, error: chartError } = useQuery({
-    queryKey: ['/api/chart-data', dateRange],
+    queryKey: ['/api/chart-data', dateRange, campaignType],
     queryFn: async () => {
       if (!dateRange) return null;
       const params = new URLSearchParams({ 
         from: dateRange.from, 
         to: dateRange.to,
-        grain: 'weekly'
+        grain: 'weekly',
+        campaignType
       });
       const response = await fetch(`/api/chart-data?${params}`);
       const data = await response.json();
@@ -66,7 +77,11 @@ export default function Dashboard() {
 
   const handleExportNegatives = async () => {
     if (!dateRange) return;
-    const params = new URLSearchParams({ from: dateRange.from, to: dateRange.to });
+    const params = new URLSearchParams({ 
+      from: dateRange.from, 
+      to: dateRange.to,
+      campaignType 
+    });
     window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
   };
 
@@ -130,7 +145,16 @@ export default function Dashboard() {
 
       <div className="sticky top-16 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center justify-between px-6 py-3">
-          <TimeRangePicker value={dateRange || undefined} onChange={setDateRange} />
+          <div className="flex items-center gap-4">
+            <TimeRangePicker value={dateRange || undefined} onChange={setDateRange} />
+            <Tabs value={campaignType} onValueChange={(val) => setCampaignType(val as typeof campaignType)}>
+              <TabsList>
+                <TabsTrigger value="products" data-testid="tab-campaign-products">Sponsored Products</TabsTrigger>
+                <TabsTrigger value="brands" data-testid="tab-campaign-brands">Sponsored Brands</TabsTrigger>
+                <TabsTrigger value="display" data-testid="tab-campaign-display">Display</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
           <div className="flex items-center gap-2">
             <FilterChip label="Period" value={getPeriodLabel()} />
             <button 

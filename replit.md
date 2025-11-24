@@ -19,13 +19,14 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
 - Sticky header with branding and export functionality.
 - Breadcrumb navigation and URL-persisted filters.
 - Click-through drilldown tables for navigation.
+- **Campaign Type Filter**: Dashboard-level toggle (Sponsored Products, Sponsored Brands, Display) filters all metrics including country-level performance.
 
 ### Technical Implementations
 - **Frontend**: React 18, TypeScript, TailwindCSS, shadcn/ui, Recharts, Wouter.
 - **Backend**: Express, Drizzle ORM, PostgreSQL (Supabase).
 - **Core Features**:
     - **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Search Terms.
-    - **Campaign Type Segmentation**: 6-view system (3 campaign types × 2 views: Search Terms, Placements).
+    - **Campaign Type Segmentation**: Dashboard-level filter allows switching between Sponsored Products, Sponsored Brands, and Display to analyze performance by campaign type.
     - **EUR Currency Conversion**: All metrics displayed in EUR using daily ECB exchange rates; country-specific views show local currency.
     - **Placement Analysis**: Campaign-level performance by placement type (TOS, ROS, PP, UNKNOWN).
     - **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders.

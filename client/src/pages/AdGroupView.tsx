@@ -8,7 +8,6 @@ import ACOSBadge from "@/components/ACOSBadge";
 import RecommendationCard from "@/components/RecommendationCard";
 import CurrencyBadge from "@/components/CurrencyBadge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Download, Sparkles } from "lucide-react";
 import { useRoute, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
@@ -27,8 +26,10 @@ export default function AdGroupView() {
   const { country: countryCode } = useSearchParams();
   
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
-  const [campaignType, setCampaignType] = useState<'products' | 'brands' | 'display'>('products');
   const [showRecommendations, setShowRecommendations] = useState(false);
+  
+  // Campaign type is now fixed to 'products' for Ad Group view
+  const campaignType = 'products';
   const { toast } = useToast();
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
@@ -198,14 +199,7 @@ export default function AdGroupView() {
         </div>
 
         <div className="space-y-6">
-          <Tabs value={campaignType} onValueChange={(val) => setCampaignType(val as typeof campaignType)}>
-            <TabsList>
-              <TabsTrigger value="products" data-testid="tab-campaign-products">Sponsored Products</TabsTrigger>
-              <TabsTrigger value="brands" data-testid="tab-campaign-brands">Sponsored Brands</TabsTrigger>
-              <TabsTrigger value="display" data-testid="tab-campaign-display">Display</TabsTrigger>
-            </TabsList>
-          </Tabs>
-            <div className="space-y-4">
+          <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-xl font-semibold">Search Terms</h2>
