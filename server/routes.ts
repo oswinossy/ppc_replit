@@ -6,7 +6,7 @@ import { sql, eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR, calculateROAS, getConfidenceLevel } from "./utils/calculations";
 import { generateBidRecommendation, detectNegativeKeywords } from "./utils/recommendations";
 import { getExchangeRatesForDate, getExchangeRatesForRange, convertToEur } from "./utils/exchangeRates";
-import { normalizePlacementName } from "@shared/currency";
+import { normalizePlacementName, getCurrencyForCountry } from "@shared/currency";
 import * as XLSX from 'xlsx';
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -774,7 +774,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           biddingStrategy: productPlacement.campaignBiddingStrategy,
           date: productPlacement.date,
           country: productPlacement.country,
-          currency: productPlacement.campaignBudgetCurrencyCode,
           impressions: sql<string>`NULLIF(${productPlacement.impressions}, '')`,
           clicks: sql<string>`NULLIF(${productPlacement.clicks}, '')`,
           cost: sql<string>`NULLIF(${productPlacement.cost}, '')`,
@@ -831,8 +830,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const sales = Number(row.sales || 0);
         const orders = Number(row.purchases || 0);
 
-        const costEur = convertToEur(cost, row.currency || 'EUR', rates);
-        const salesEur = convertToEur(sales, row.currency || 'EUR', rates);
+        // Map country code to currency (productPlacement table doesn't have currency column)
+        const currency = getCurrencyForCountry(row.country || '');
+        const costEur = convertToEur(cost, currency, rates);
+        const salesEur = convertToEur(sales, currency, rates);
 
         group.totalImpressions += impressions;
         group.totalClicks += clicks;

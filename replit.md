@@ -48,7 +48,10 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - **Currency Symbols**: Visual indicators display £, $, kr, zł, € symbols in country-specific views via CurrencyBadge component.
     - **API Support**: All endpoints (`/api/kpis`, `/api/chart-data`, `/api/campaigns`, `/api/search-terms`) support `convertToEur` parameter.
     - **Multi-Currency Guards**: Backend validates single-currency aggregation when `convertToEur=false` to prevent mixing USD+GBP+etc.
-    - **Exchange Rates**: Uses Frankfurter API (European Central Bank) for daily rates with date-range support.
+    - **Exchange Rates**: Uses Frankfurter API (api.frankfurter.app - European Central Bank) for daily rates with batch date-range support.
+    - **Performance Optimization**: Single batch API call via `getExchangeRatesForRange()` replaces 60+ sequential calls, achieving **16-17x speedup** (22s → 1.4s).
+    - **Country-to-Currency Mapping**: `productPlacement` table lacks currency field; uses `getCurrencyForCountry()` helper to map country codes to currencies.
+    - **Fallback Rates**: When API lacks data (e.g., future dates), silently uses default rates (USD: 0.92, GBP: 1.17, SEK: 0.088, PLN: 0.23 EUR).
     - **Frontend Integration**: Centralized `useSearchParams` hook extracts country query parameter; views conditionally pass `convertToEur=false`.
     - **URL Parameters**: Country code propagated via `?country=` query parameter; enables currency persistence across drill-down.
 

@@ -39,7 +39,7 @@ export async function getExchangeRatesForDate(date: string): Promise<Record<stri
     const useLatest = targetDate > today;
     
     const endpoint = useLatest ? 'latest' : date;
-    const response = await fetch(`https://api.frankfurter.dev/${endpoint}`);
+    const response = await fetch(`https://api.frankfurter.app/${endpoint}`);
     
     if (!response.ok) {
       // Silently use default rates for failed requests
@@ -76,7 +76,7 @@ export async function getExchangeRatesForRange(
   try {
     // Frankfurter supports time series queries
     const response = await fetch(
-      `https://api.frankfurter.dev/${startDate}..${endDate}`
+      `https://api.frankfurter.app/${startDate}..${endDate}`
     );
     
     if (!response.ok) {
@@ -127,8 +127,10 @@ export function convertToEur(
   
   const rate = exchangeRates[sourceCurrency];
   if (!rate) {
-    console.warn(`No exchange rate found for ${sourceCurrency}, using 1:1`);
-    return amount;
+    // Silently use default rate (data may contain dates without API support)
+    const defaultRates = getDefaultRates();
+    const defaultRate = defaultRates[sourceCurrency];
+    return defaultRate ? amount * defaultRate : amount;
   }
   
   return amount * rate;
