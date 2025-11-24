@@ -8,11 +8,18 @@ import { generateBidRecommendation, detectNegativeKeywords } from "./utils/recom
 import { getExchangeRatesForDate, getExchangeRatesForRange, convertToEur } from "./utils/exchangeRates";
 import { normalizePlacementName, getCurrencyForCountry } from "@shared/currency";
 import * as XLSX from 'xlsx';
+import { getCached, setCache, generateCacheKey } from "./cache";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
   // KPI aggregation endpoint - filters by campaign type
   app.get("/api/kpis", async (req, res) => {
+    // Check cache first
+    const cacheKey = generateCacheKey('/api/kpis', req.query as Record<string, any>);
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
     try {
       const { country, campaignId, adGroupId, campaignType = 'products', from, to, convertToEur: convertToEurParam = 'true' } = req.query;
       const shouldConvertToEur = convertToEurParam === 'true';
@@ -139,7 +146,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const cpc = calculateCPC(totalCost, totalClicks);
       const roas = calculateROAS(totalSales, totalCost);
 
-      res.json({
+      const response = {
         adSales: totalSales,
         acos,
         cpc,
@@ -148,7 +155,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         orders: totalOrders,
         clicks: totalClicks,
         currency: resultCurrency,
-      });
+      };
+      
+      // Cache the response
+      setCache(cacheKey, response);
+      
+      res.json(response);
     } catch (error) {
       console.error('KPI error:', error);
       res.status(500).json({ error: 'Failed to fetch KPIs' });
@@ -157,6 +169,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Countries list endpoint - combines brand + product with EUR conversion
   app.get("/api/countries", async (req, res) => {
+    // Check cache first
+    const cacheKey = generateCacheKey('/api/countries', req.query as Record<string, any>);
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
     try {
       const { from, to } = req.query;
       
@@ -285,6 +303,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }))
         .sort((a, b) => b.sales - a.sales);
 
+      // Cache the response
+      setCache(cacheKey, countries);
+      
       res.json(countries);
     } catch (error) {
       console.error('Countries error:', error);
@@ -913,6 +934,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Chart data endpoint with aggregation - combines brand + product
   app.get("/api/chart-data", async (req, res) => {
+    // Check cache first
+    const cacheKey = generateCacheKey('/api/chart-data', req.query as Record<string, any>);
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
     try {
       const { country, campaignId, from, to, groupBy = 'daily', convertToEur: convertToEurParam = 'true' } = req.query;
       const convertToEur = convertToEurParam === 'true';
@@ -1040,6 +1067,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }))
         .sort((a, b) => a.date.localeCompare(b.date));
 
+      // Cache the response
+      setCache(cacheKey, chartData);
+      
       res.json(chartData);
     } catch (error) {
       console.error('Chart data error:', error);

@@ -17,13 +17,20 @@ import { format, subDays, differenceInDays, parseISO } from "date-fns";
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
-  const [dateRange, setDateRange] = useState<{ from: string; to: string } | null>(null);
+  // Initialize with last 60 days to load data immediately
+  const [dateRange, setDateRange] = useState<{ from: string; to: string }>(() => {
+    const to = new Date();
+    const from = subDays(to, 59);
+    return {
+      from: format(from, 'yyyy-MM-dd'),
+      to: format(to, 'yyyy-MM-dd'),
+    };
+  });
   const [campaignType, setCampaignType] = useState<'products' | 'brands' | 'display'>('products');
 
   const { data: kpis, isLoading: kpisLoading, error: kpisError } = useQuery({
     queryKey: ['/api/kpis', dateRange, campaignType],
     queryFn: async () => {
-      if (!dateRange) return null;
       const params = new URLSearchParams({ 
         from: dateRange.from, 
         to: dateRange.to,
@@ -34,14 +41,12 @@ export default function Dashboard() {
       if (data.error) throw new Error(data.error);
       return data;
     },
-    enabled: !!dateRange,
     refetchInterval: 3600000, // Auto-refresh every hour (3600000ms = 1 hour)
   });
 
   const { data: countries, isLoading: countriesLoading, error: countriesError } = useQuery({
     queryKey: ['/api/countries', dateRange, campaignType],
     queryFn: async () => {
-      if (!dateRange) return null;
       const params = new URLSearchParams({ 
         from: dateRange.from, 
         to: dateRange.to,
@@ -52,14 +57,12 @@ export default function Dashboard() {
       if (data.error) throw new Error(data.error);
       return data;
     },
-    enabled: !!dateRange,
     refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const { data: chartData, isLoading: chartLoading, error: chartError } = useQuery({
     queryKey: ['/api/chart-data', dateRange, campaignType],
     queryFn: async () => {
-      if (!dateRange) return null;
       const params = new URLSearchParams({ 
         from: dateRange.from, 
         to: dateRange.to,
@@ -71,12 +74,10 @@ export default function Dashboard() {
       if (data.error) throw new Error(data.error);
       return data;
     },
-    enabled: !!dateRange,
     refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const handleExportNegatives = async () => {
-    if (!dateRange) return;
     const params = new URLSearchParams({ 
       from: dateRange.from, 
       to: dateRange.to,
@@ -146,7 +147,7 @@ export default function Dashboard() {
       <div className="sticky top-16 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-4">
-            <TimeRangePicker value={dateRange || undefined} onChange={setDateRange} />
+            <TimeRangePicker value={dateRange} onChange={setDateRange} />
             <Tabs value={campaignType} onValueChange={(val) => setCampaignType(val as typeof campaignType)}>
               <TabsList>
                 <TabsTrigger value="products" data-testid="tab-campaign-products">Sponsored Products</TabsTrigger>

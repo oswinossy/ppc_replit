@@ -9,6 +9,10 @@ interface ExchangeRateResponse {
   rates: Record<string, number>;
 }
 
+// In-memory cache for exchange rates (5-minute TTL)
+const exchangeRateCache = new Map<string, { data: Map<string, Record<string, number>>; timestamp: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 interface CurrencyMap {
   GBP: string;
   USD: string;
@@ -73,6 +77,16 @@ export async function getExchangeRatesForRange(
   startDate: string,
   endDate: string
 ): Promise<Map<string, Record<string, number>>> {
+  // Check cache first
+  const cacheKey = `${startDate}..${endDate}`;
+  const cached = exchangeRateCache.get(cacheKey);
+  const now = Date.now();
+  
+  if (cached && (now - cached.timestamp) < CACHE_TTL_MS) {
+    // Return cached data if still fresh
+    return cached.data;
+  }
+  
   try {
     // Frankfurter supports time series queries
     const response = await fetch(
@@ -102,6 +116,20 @@ export async function getExchangeRatesForRange(
         }
         
         ratesMap.set(date, toEurRates);
+      }
+    }
+    
+    // Cache the result
+    exchangeRateCache.set(cacheKey, {
+      data: ratesMap,
+      timestamp: now
+    });
+    
+    // Clean up old cache entries (keep only last 10)
+    if (exchangeRateCache.size > 10) {
+      const firstKey = exchangeRateCache.keys().next().value;
+      if (firstKey) {
+        exchangeRateCache.delete(firstKey);
       }
     }
     
