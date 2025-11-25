@@ -8,7 +8,8 @@ import ThemeToggle from "@/components/ThemeToggle";
 import ACOSBadge from "@/components/ACOSBadge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Download, TrendingUp } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Download, TrendingUp, Globe } from "lucide-react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -27,25 +28,11 @@ export default function Dashboard() {
     };
   });
   const [campaignType, setCampaignType] = useState<'products' | 'brands' | 'display'>('products');
+  const [selectedCountry, setSelectedCountry] = useState<string>('all');
 
-  const { data: kpis, isLoading: kpisLoading, error: kpisError } = useQuery({
-    queryKey: ['/api/kpis', dateRange, campaignType],
-    queryFn: async () => {
-      const params = new URLSearchParams({ 
-        from: dateRange.from, 
-        to: dateRange.to,
-        campaignType 
-      });
-      const response = await fetch(`/api/kpis?${params}`);
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-      return data;
-    },
-    refetchInterval: 3600000, // Auto-refresh every hour (3600000ms = 1 hour)
-  });
-
-  const { data: countries, isLoading: countriesLoading, error: countriesError } = useQuery({
-    queryKey: ['/api/countries', dateRange, campaignType],
+  // Fetch available countries for the dropdown (always fetch all countries regardless of selection)
+  const { data: availableCountries } = useQuery({
+    queryKey: ['/api/countries', dateRange, campaignType, 'dropdown'],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         from: dateRange.from, 
@@ -57,11 +44,50 @@ export default function Dashboard() {
       if (data.error) throw new Error(data.error);
       return data;
     },
+    refetchInterval: 3600000,
+  });
+
+  const { data: kpis, isLoading: kpisLoading, error: kpisError } = useQuery({
+    queryKey: ['/api/kpis', dateRange, campaignType, selectedCountry],
+    queryFn: async () => {
+      const params = new URLSearchParams({ 
+        from: dateRange.from, 
+        to: dateRange.to,
+        campaignType 
+      });
+      if (selectedCountry !== 'all') {
+        params.set('country', selectedCountry);
+      }
+      const response = await fetch(`/api/kpis?${params}`);
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      return data;
+    },
+    refetchInterval: 3600000, // Auto-refresh every hour (3600000ms = 1 hour)
+  });
+
+  const { data: countries, isLoading: countriesLoading, error: countriesError } = useQuery({
+    queryKey: ['/api/countries', dateRange, campaignType, selectedCountry],
+    queryFn: async () => {
+      const params = new URLSearchParams({ 
+        from: dateRange.from, 
+        to: dateRange.to,
+        campaignType 
+      });
+      const response = await fetch(`/api/countries?${params}`);
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      // If a specific country is selected, filter the results
+      if (selectedCountry !== 'all') {
+        return data.filter((c: any) => c.code === selectedCountry);
+      }
+      return data;
+    },
     refetchInterval: 3600000, // Auto-refresh every hour
   });
 
   const { data: chartData, isLoading: chartLoading, error: chartError } = useQuery({
-    queryKey: ['/api/chart-data', dateRange, campaignType],
+    queryKey: ['/api/chart-data', dateRange, campaignType, selectedCountry],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         from: dateRange.from, 
@@ -69,6 +95,9 @@ export default function Dashboard() {
         grain: 'weekly',
         campaignType
       });
+      if (selectedCountry !== 'all') {
+        params.set('country', selectedCountry);
+      }
       const response = await fetch(`/api/chart-data?${params}`);
       const data = await response.json();
       if (data.error) throw new Error(data.error);
@@ -83,6 +112,9 @@ export default function Dashboard() {
       to: dateRange.to,
       campaignType 
     });
+    if (selectedCountry !== 'all') {
+      params.set('country', selectedCountry);
+    }
     window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
   };
 
@@ -109,6 +141,7 @@ export default function Dashboard() {
       from: format(from, 'yyyy-MM-dd'),
       to: format(to, 'yyyy-MM-dd'),
     });
+    setSelectedCountry('all');
   };
 
   const kpiCards = kpis ? [
@@ -124,8 +157,8 @@ export default function Dashboard() {
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center justify-between px-6 py-3">
-          <div className="flex items-center gap-8">
-            <h1 className="text-2xl font-bold" data-testid="brand-logo">Elan v2</h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold" data-testid="brand-logo">Elan</h1>
             <div className="flex items-center gap-1 p-1 bg-muted rounded-lg border-2 border-primary">
               <button
                 onClick={() => setCampaignType('products')}
@@ -161,6 +194,24 @@ export default function Dashboard() {
                 Display
               </button>
             </div>
+            <Select value={selectedCountry} onValueChange={setSelectedCountry}>
+              <SelectTrigger className="w-[180px]" data-testid="select-country">
+                <Globe className="h-4 w-4 mr-2 text-muted-foreground" />
+                <SelectValue placeholder="All Countries" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" data-testid="option-country-all">All Countries</SelectItem>
+                {availableCountries && Array.isArray(availableCountries) && availableCountries.map((country: any) => (
+                  <SelectItem 
+                    key={country.code} 
+                    value={country.code}
+                    data-testid={`option-country-${country.code}`}
+                  >
+                    {country.country}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <BreadcrumbNav items={[{ label: "Dashboard" }]} />
           </div>
           <div className="flex items-center gap-4">
@@ -186,6 +237,12 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-2">
             <FilterChip label="Period" value={getPeriodLabel()} />
+            {selectedCountry !== 'all' && (
+              <FilterChip 
+                label="Country" 
+                value={availableCountries?.find((c: any) => c.code === selectedCountry)?.country || selectedCountry} 
+              />
+            )}
             <button 
               className="text-sm text-primary hover:underline" 
               onClick={handleClearFilters}
