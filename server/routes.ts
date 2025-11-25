@@ -1101,6 +1101,196 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Combined dashboard endpoint - fetches KPIs, countries, and chart data in parallel
+  app.get("/api/dashboard", async (req, res) => {
+    const cacheKey = generateCacheKey('/api/dashboard', req.query as Record<string, any>);
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    try {
+      const { from, to, campaignType = 'products', country } = req.query;
+
+      // Helper function to get table based on campaign type
+      const getTable = () => {
+        if (campaignType === 'brands') return brandSearchTerms;
+        if (campaignType === 'display') return displayMatchedTarget;
+        return productSearchTerms;
+      };
+
+      const table = getTable();
+
+      // Build base conditions
+      const baseConditions: any[] = [];
+      if (from) baseConditions.push(gte(table.date, from as string));
+      if (to) baseConditions.push(lte(table.date, to as string));
+      if (country && country !== 'all') baseConditions.push(eq(table.country, country as string));
+
+      // Fetch raw data once with all needed fields
+      let rawData: Array<{ 
+        date: string | null; 
+        country: string | null; 
+        currency: string | null; 
+        clicks: number; 
+        cost: number; 
+        sales: number; 
+        orders: number;
+      }>;
+
+      if (campaignType === 'brands') {
+        rawData = await db
+          .select({
+            date: brandSearchTerms.date,
+            country: brandSearchTerms.country,
+            currency: brandSearchTerms.campaignBudgetCurrencyCode,
+            clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+            cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+            sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+            orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+          })
+          .from(brandSearchTerms)
+          .where(baseConditions.length > 0 ? and(...baseConditions) : undefined)
+          .groupBy(brandSearchTerms.date, brandSearchTerms.country, brandSearchTerms.campaignBudgetCurrencyCode);
+      } else if (campaignType === 'display') {
+        rawData = await db
+          .select({
+            date: displayMatchedTarget.date,
+            country: displayMatchedTarget.country,
+            currency: displayMatchedTarget.campaignBudgetCurrencyCode,
+            clicks: sql<number>`COALESCE(SUM(${displayMatchedTarget.clicks}), 0)`,
+            cost: sql<number>`COALESCE(SUM(${displayMatchedTarget.cost}), 0)`,
+            sales: sql<number>`COALESCE(SUM(${displayMatchedTarget.sales}), 0)`,
+            orders: sql<number>`COALESCE(SUM(${displayMatchedTarget.purchases}), 0)`,
+          })
+          .from(displayMatchedTarget)
+          .where(baseConditions.length > 0 ? and(...baseConditions) : undefined)
+          .groupBy(displayMatchedTarget.date, displayMatchedTarget.country, displayMatchedTarget.campaignBudgetCurrencyCode);
+      } else {
+        rawData = await db
+          .select({
+            date: productSearchTerms.date,
+            country: productSearchTerms.country,
+            currency: productSearchTerms.campaignBudgetCurrencyCode,
+            clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+            cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          })
+          .from(productSearchTerms)
+          .where(baseConditions.length > 0 ? and(...baseConditions) : undefined)
+          .groupBy(productSearchTerms.date, productSearchTerms.country, productSearchTerms.campaignBudgetCurrencyCode);
+      }
+
+      // Fetch exchange rates once for the entire date range
+      const allDates = rawData.map(row => row.date).filter((d): d is string => Boolean(d));
+      const minDate = allDates.length > 0 ? allDates.reduce((a, b) => a < b ? a : b) : null;
+      const maxDate = allDates.length > 0 ? allDates.reduce((a, b) => a > b ? a : b) : null;
+      
+      let exchangeRatesCache = new Map<string, Record<string, number>>();
+      if (minDate && maxDate) {
+        exchangeRatesCache = await getExchangeRatesForRange(minDate, maxDate);
+      }
+
+      // Process data for KPIs (aggregate all)
+      let totalClicks = 0, totalCost = 0, totalSales = 0, totalOrders = 0;
+      rawData.forEach(row => {
+        if (!row.date) return;
+        const rates = exchangeRatesCache.get(row.date) || {};
+        totalClicks += Number(row.clicks);
+        totalCost += convertToEur(Number(row.cost), row.currency || 'EUR', rates);
+        totalSales += convertToEur(Number(row.sales), row.currency || 'EUR', rates);
+        totalOrders += Number(row.orders);
+      });
+
+      const kpis = {
+        adSales: totalSales,
+        acos: calculateACOS(totalCost, totalSales),
+        cpc: calculateCPC(totalCost, totalClicks),
+        cost: totalCost,
+        roas: calculateROAS(totalSales, totalCost),
+        orders: totalOrders,
+        clicks: totalClicks,
+        currency: 'EUR',
+      };
+
+      // Process data for countries (aggregate by country)
+      const countryMap = new Map<string, { country: string; clicks: number; cost: number; sales: number; orders: number }>();
+      rawData.forEach(row => {
+        if (!row.country || !row.date) return;
+        const rates = exchangeRatesCache.get(row.date) || {};
+        const costEur = convertToEur(Number(row.cost), row.currency || 'EUR', rates);
+        const salesEur = convertToEur(Number(row.sales), row.currency || 'EUR', rates);
+        
+        const existing = countryMap.get(row.country);
+        if (existing) {
+          existing.clicks += Number(row.clicks);
+          existing.cost += costEur;
+          existing.sales += salesEur;
+          existing.orders += Number(row.orders);
+        } else {
+          countryMap.set(row.country, {
+            country: row.country,
+            clicks: Number(row.clicks),
+            cost: costEur,
+            sales: salesEur,
+            orders: Number(row.orders),
+          });
+        }
+      });
+
+      const countries = Array.from(countryMap.values())
+        .map(row => ({
+          country: row.country,
+          code: row.country,
+          clicks: row.clicks,
+          cost: row.cost,
+          sales: row.sales,
+          orders: row.orders,
+          acos: calculateACOS(row.cost, row.sales),
+          currency: 'EUR',
+        }))
+        .sort((a, b) => b.sales - a.sales);
+
+      // Process data for chart (aggregate by week)
+      const weekMap = new Map<string, { cost: number; sales: number }>();
+      rawData.forEach(row => {
+        if (!row.date) return;
+        const date = new Date(row.date);
+        const weekStart = new Date(date.setDate(date.getDate() - date.getDay()));
+        const weekKey = weekStart.toISOString().split('T')[0];
+        
+        const rates = exchangeRatesCache.get(row.date) || {};
+        const costEur = convertToEur(Number(row.cost), row.currency || 'EUR', rates);
+        const salesEur = convertToEur(Number(row.sales), row.currency || 'EUR', rates);
+        
+        const existing = weekMap.get(weekKey);
+        if (existing) {
+          existing.cost += costEur;
+          existing.sales += salesEur;
+        } else {
+          weekMap.set(weekKey, { cost: costEur, sales: salesEur });
+        }
+      });
+
+      const chartData = Array.from(weekMap.entries())
+        .map(([date, data]) => ({
+          date,
+          acos: calculateACOS(data.cost, data.sales),
+          sales: data.sales,
+          currency: 'EUR',
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      const response = { kpis, countries, chartData };
+      setCache(cacheKey, response);
+      res.json(response);
+    } catch (error) {
+      console.error('Dashboard error:', error);
+      res.status(500).json({ error: 'Failed to fetch dashboard data' });
+    }
+  });
+
   // Negative keywords endpoint
   app.get("/api/negative-keywords", async (req, res) => {
     try {

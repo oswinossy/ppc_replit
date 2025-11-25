@@ -30,7 +30,27 @@ export default function Dashboard() {
   const [campaignType, setCampaignType] = useState<'products' | 'brands' | 'display'>('products');
   const [selectedCountry, setSelectedCountry] = useState<string>('all');
 
-  // Fetch available countries for the dropdown (always fetch all countries regardless of selection)
+  // Single combined API call for all dashboard data - much faster than 4 separate calls
+  const { data: dashboardData, isLoading: dashboardLoading, error: dashboardError } = useQuery({
+    queryKey: ['/api/dashboard', dateRange, campaignType, selectedCountry],
+    queryFn: async () => {
+      const params = new URLSearchParams({ 
+        from: dateRange.from, 
+        to: dateRange.to,
+        campaignType
+      });
+      if (selectedCountry !== 'all') {
+        params.set('country', selectedCountry);
+      }
+      const response = await fetch(`/api/dashboard?${params}`);
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      return data;
+    },
+    refetchInterval: 3600000, // Auto-refresh every hour
+  });
+
+  // Separate query for available countries (always all countries, unfiltered)
   const { data: availableCountries } = useQuery({
     queryKey: ['/api/countries', dateRange, campaignType, 'dropdown'],
     queryFn: async () => {
@@ -44,67 +64,22 @@ export default function Dashboard() {
       if (data.error) throw new Error(data.error);
       return data;
     },
-    refetchInterval: 3600000,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
-  const { data: kpis, isLoading: kpisLoading, error: kpisError } = useQuery({
-    queryKey: ['/api/kpis', dateRange, campaignType, selectedCountry],
-    queryFn: async () => {
-      const params = new URLSearchParams({ 
-        from: dateRange.from, 
-        to: dateRange.to,
-        campaignType 
-      });
-      if (selectedCountry !== 'all') {
-        params.set('country', selectedCountry);
-      }
-      const response = await fetch(`/api/kpis?${params}`);
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-      return data;
-    },
-    refetchInterval: 3600000, // Auto-refresh every hour (3600000ms = 1 hour)
-  });
-
-  const { data: countries, isLoading: countriesLoading, error: countriesError } = useQuery({
-    queryKey: ['/api/countries', dateRange, campaignType, selectedCountry],
-    queryFn: async () => {
-      const params = new URLSearchParams({ 
-        from: dateRange.from, 
-        to: dateRange.to,
-        campaignType 
-      });
-      const response = await fetch(`/api/countries?${params}`);
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-      // If a specific country is selected, filter the results
-      if (selectedCountry !== 'all') {
-        return data.filter((c: any) => c.code === selectedCountry);
-      }
-      return data;
-    },
-    refetchInterval: 3600000, // Auto-refresh every hour
-  });
-
-  const { data: chartData, isLoading: chartLoading, error: chartError } = useQuery({
-    queryKey: ['/api/chart-data', dateRange, campaignType, selectedCountry],
-    queryFn: async () => {
-      const params = new URLSearchParams({ 
-        from: dateRange.from, 
-        to: dateRange.to,
-        grain: 'weekly',
-        campaignType
-      });
-      if (selectedCountry !== 'all') {
-        params.set('country', selectedCountry);
-      }
-      const response = await fetch(`/api/chart-data?${params}`);
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-      return data;
-    },
-    refetchInterval: 3600000, // Auto-refresh every hour
-  });
+  // Extract data from combined response
+  const kpis = dashboardData?.kpis;
+  const kpisLoading = dashboardLoading;
+  const chartData = dashboardData?.chartData;
+  const chartLoading = dashboardLoading;
+  const chartError = dashboardError;
+  
+  // Countries: filter if specific country selected, otherwise show all
+  const countries = selectedCountry !== 'all' 
+    ? dashboardData?.countries?.filter((c: any) => c.code === selectedCountry)
+    : dashboardData?.countries;
+  const countriesLoading = dashboardLoading;
+  const countriesError = dashboardError;
 
   const handleExportNegatives = async () => {
     const params = new URLSearchParams({ 
