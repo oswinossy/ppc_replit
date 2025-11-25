@@ -125,7 +125,7 @@ export default function Dashboard() {
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-8">
-            <h1 className="text-2xl font-bold" data-testid="brand-logo">Elan</h1>
+            <h1 className="text-2xl font-bold" data-testid="brand-logo">Elan v2</h1>
             <div className="flex items-center gap-1 p-1 bg-muted rounded-lg border-2 border-primary">
               <button
                 onClick={() => setCampaignType('products')}
