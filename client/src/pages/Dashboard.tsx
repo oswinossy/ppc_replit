@@ -126,6 +126,41 @@ export default function Dashboard() {
         <div className="flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-8">
             <h1 className="text-2xl font-bold" data-testid="brand-logo">Elan</h1>
+            <div className="flex items-center gap-1 p-1 bg-muted rounded-lg border-2 border-primary">
+              <button
+                onClick={() => setCampaignType('products')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  campaignType === 'products' 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background'
+                }`}
+                data-testid="tab-campaign-products"
+              >
+                Products
+              </button>
+              <button
+                onClick={() => setCampaignType('brands')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  campaignType === 'brands' 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background'
+                }`}
+                data-testid="tab-campaign-brands"
+              >
+                Brands
+              </button>
+              <button
+                onClick={() => setCampaignType('display')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  campaignType === 'display' 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background'
+                }`}
+                data-testid="tab-campaign-display"
+              >
+                Display
+              </button>
+            </div>
             <BreadcrumbNav items={[{ label: "Dashboard" }]} />
           </div>
           <div className="flex items-center gap-4">
@@ -148,41 +183,6 @@ export default function Dashboard() {
         <div className="flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-4">
             <TimeRangePicker value={dateRange} onChange={setDateRange} />
-            <div className="flex items-center gap-2 p-1 bg-muted rounded-lg">
-              <button
-                onClick={() => setCampaignType('products')}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  campaignType === 'products' 
-                    ? 'bg-background text-foreground shadow-sm' 
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                data-testid="tab-campaign-products"
-              >
-                Sponsored Products
-              </button>
-              <button
-                onClick={() => setCampaignType('brands')}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  campaignType === 'brands' 
-                    ? 'bg-background text-foreground shadow-sm' 
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                data-testid="tab-campaign-brands"
-              >
-                Sponsored Brands
-              </button>
-              <button
-                onClick={() => setCampaignType('display')}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  campaignType === 'display' 
-                    ? 'bg-background text-foreground shadow-sm' 
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                data-testid="tab-campaign-display"
-              >
-                Display
-              </button>
-            </div>
           </div>
           <div className="flex items-center gap-2">
             <FilterChip label="Period" value={getPeriodLabel()} />
