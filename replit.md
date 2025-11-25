@@ -75,6 +75,7 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - **Placement Classification**: Database stores raw values ("Top of Search on-Amazon", "Detail Page on-Amazon", "Other on-Amazon", "Off Amazon") which are normalized to Amazon UI terminology ("Top of search (first page)", "Product pages", "Rest of search", "Off Amazon") via `normalizePlacementName()` helper.
 - **API Architecture**:
     - All API endpoints filter by `campaignType` (defaults to 'products').
+    - **Campaign Type Filtering (Nov 2025 Fix)**: All three main endpoints (`/api/kpis`, `/api/countries`, `/api/chart-data`) now consistently filter by `campaignType` parameter. Previously, `/api/countries` and `/api/chart-data` aggregated all campaign types regardless of filter, causing KPI totals to not match countries table sums.
     - `adGroupId` filter is applied ONLY to Sponsored Products; ignored for Sponsored Brands and Display campaigns as they lack this field in a compatible structure.
     - API responses include calculated fields: `cpc`, `cvr`, `acos`.
     - Frontend renders use null guards for numeric values: `(val ?? 0).toFixed(2)`.
