@@ -16,11 +16,8 @@ try {
   console.log('  - Host:', parsed.hostname);
   console.log('  - Port:', parsed.port);
   console.log('  - Database:', parsed.pathname);
-  console.log('  - Password length:', parsed.password?.length || 0);
-  
-  if (!parsed.username.includes('.')) {
-    console.error('ERROR: Username should be "postgres.PROJECTID", got:', parsed.username);
-  }
+  console.log('  - Password (decoded):', decodeURIComponent(parsed.password));
+  console.log('  - Password length:', decodeURIComponent(parsed.password)?.length || 0);
 } catch (e) {
   console.error('Failed to parse DATABASE_URL:', e);
 }
