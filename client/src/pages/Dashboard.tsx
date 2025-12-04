@@ -264,21 +264,23 @@ export default function Dashboard() {
           ) : countriesError ? (
             <div className="border rounded-lg p-8 text-center space-y-4" data-testid="error-message">
               <div className="space-y-2">
-                <h3 className="text-lg font-semibold">Database Setup Required</h3>
+                <h3 className="text-lg font-semibold">Connection Error</h3>
                 <p className="text-sm text-muted-foreground max-w-2xl mx-auto">
-                  Your Supabase table name contains hyphens which require a database view. 
-                  Please create the view in your Supabase SQL Editor:
+                  Unable to load data from the database. This may be a temporary issue.
                 </p>
               </div>
-              <div className="bg-muted p-4 rounded-md text-left max-w-3xl mx-auto">
-                <code className="text-sm font-mono">
-                  CREATE OR REPLACE VIEW vw_sp_search_terms_daily AS<br />
-                  SELECT * FROM "sp_search_terms_daily_from22-09-2025";
+              <div className="bg-muted p-4 rounded-md text-left max-w-xl mx-auto">
+                <code className="text-sm font-mono text-destructive">
+                  {countriesError instanceof Error ? countriesError.message : 'Unknown error occurred'}
                 </code>
               </div>
-              <p className="text-xs text-muted-foreground">
-                See <code className="bg-muted px-2 py-1 rounded">supabase-setup.sql</code> for the complete setup script
-              </p>
+              <Button 
+                variant="outline" 
+                onClick={() => window.location.reload()}
+                data-testid="button-retry"
+              >
+                Retry
+              </Button>
             </div>
           ) : countries && Array.isArray(countries) ? (
             <DataTable

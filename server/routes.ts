@@ -1285,9 +1285,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const response = { kpis, countries, chartData };
       setCache(cacheKey, response);
       res.json(response);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Dashboard error:', error);
-      res.status(500).json({ error: 'Failed to fetch dashboard data' });
+      res.status(500).json({ 
+        error: 'Failed to fetch dashboard data',
+        details: error.message || 'Unknown error'
+      });
     }
   });
 
@@ -1572,6 +1575,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Recommendations generation error:', error);
       res.status(500).json({ error: 'Failed to generate recommendations' });
+    }
+  });
+
+  // Health check endpoint to verify database connectivity
+  app.get("/api/health", async (req, res) => {
+    try {
+      // Test database connection by running a simple query
+      await db.execute(sql`SELECT 1 as test`);
+      
+      // Also verify our tables exist
+      const tableCheck = await db.execute(sql`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name IN ('s_products_search_terms', 's_brand_search_terms', 's_display_matched_target')
+      `);
+      
+      const tables = Array.isArray(tableCheck) ? tableCheck.map((row: any) => row.table_name) : [];
+      
+      res.json({ 
+        status: 'ok',
+        database: 'connected',
+        tables: tables,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      console.error('Health check failed:', error);
+      res.status(500).json({ 
+        status: 'error',
+        database: 'disconnected',
+        error: error.message || 'Unknown database error',
+        timestamp: new Date().toISOString()
+      });
     }
   });
 
