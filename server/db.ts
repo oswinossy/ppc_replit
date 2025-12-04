@@ -6,21 +6,10 @@ if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is not set');
 }
 
-// Debug: Parse and check URL format
-const url = process.env.DATABASE_URL;
-try {
-  const parsed = new URL(url);
-  console.log('DATABASE_URL parsed:');
-  console.log('  - Protocol:', parsed.protocol);
-  console.log('  - Username:', parsed.username);
-  console.log('  - Host:', parsed.hostname);
-  console.log('  - Port:', parsed.port);
-  console.log('  - Database:', parsed.pathname);
-  console.log('  - Password (decoded):', decodeURIComponent(parsed.password));
-  console.log('  - Password length:', decodeURIComponent(parsed.password)?.length || 0);
-} catch (e) {
-  console.error('Failed to parse DATABASE_URL:', e);
-}
+// Trim any whitespace from URL and fix encoded spaces in password
+let connectionUrl = process.env.DATABASE_URL.trim();
+// Fix common issue: space encoded as %20 or literal space after colon in password portion
+connectionUrl = connectionUrl.replace(/:(%20| )+/g, ':');
 
-const client = postgres(process.env.DATABASE_URL);
+const client = postgres(connectionUrl);
 export const db = drizzle(client, { schema });
