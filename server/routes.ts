@@ -600,7 +600,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .select({
             searchTerm: productSearchTerms.searchTerm,
             keyword: sql<string>`MAX(${productSearchTerms.keyword})`,
-            matchType: sql<string>`MAX(${productSearchTerms.matchType})`,
+            matchType: productSearchTerms.matchType,
             keywordBid: sql<number>`MAX(${productSearchTerms.keywordBid})`,
             clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
             cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
@@ -610,7 +610,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
           .from(productSearchTerms)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .groupBy(productSearchTerms.searchTerm);
+          .groupBy(productSearchTerms.searchTerm, productSearchTerms.matchType);
       }
 
       const searchTerms = results
