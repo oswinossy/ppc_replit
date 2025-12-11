@@ -1578,6 +1578,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Attribution comparison endpoint - compare different attribution windows
+  app.get("/api/attribution-comparison", async (req, res) => {
+    try {
+      const { from, to } = req.query;
+      
+      const conditions = [];
+      if (from) conditions.push(gte(productSearchTerms.date, from as string));
+      if (to) conditions.push(lte(productSearchTerms.date, to as string));
+      
+      // First check what columns have data
+      const sampleCheck = await db.execute(sql`
+        SELECT 
+          COUNT(*) as total_rows,
+          COUNT(sales1d) as has_sales1d,
+          COUNT(sales7d) as has_sales7d,
+          COUNT(sales14d) as has_sales14d,
+          COUNT(sales30d) as has_sales30d
+        FROM s_products_search_terms
+        WHERE date >= ${from} AND date <= ${to}
+        LIMIT 1
+      `);
+      
+      const result = await db
+        .select({
+          sales1d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales1d}, '')::numeric), 0)`,
+          sales7d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          sales14d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales14d}, '')::numeric), 0)`,
+          sales30d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+          orders1d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases1d}, '')::numeric), 0)`,
+          orders7d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          orders14d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases14d}, '')::numeric), 0)`,
+          orders30d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
+        })
+        .from(productSearchTerms)
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
+      
+      const data = result[0];
+      const sample = Array.isArray(sampleCheck) ? sampleCheck[0] : sampleCheck;
+      
+      res.json({
+        period: { from, to },
+        dataAvailability: sample,
+        sales: {
+          '1d': Number(data.sales1d),
+          '7d': Number(data.sales7d),
+          '14d': Number(data.sales14d),
+          '30d': Number(data.sales30d),
+        },
+        orders: {
+          '1d': Number(data.orders1d),
+          '7d': Number(data.orders7d),
+          '14d': Number(data.orders14d),
+          '30d': Number(data.orders30d),
+        },
+        differences: {
+          '7d_vs_1d': data.sales1d > 0 ? ((Number(data.sales7d) - Number(data.sales1d)) / Number(data.sales1d) * 100).toFixed(1) + '%' : 'N/A (no 1d data)',
+          '14d_vs_7d': data.sales7d > 0 ? ((Number(data.sales14d) - Number(data.sales7d)) / Number(data.sales7d) * 100).toFixed(1) + '%' : 'N/A (no 7d data)',
+          '30d_vs_14d': data.sales14d > 0 ? ((Number(data.sales30d) - Number(data.sales14d)) / Number(data.sales14d) * 100).toFixed(1) + '%' : 'N/A (no 14d data)',
+        }
+      });
+    } catch (error: any) {
+      console.error('Attribution comparison error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Health check endpoint to verify database connectivity
   app.get("/api/health", async (req, res) => {
     try {
