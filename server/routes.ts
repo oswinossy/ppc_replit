@@ -1581,11 +1581,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Attribution comparison endpoint - compare different attribution windows
   app.get("/api/attribution-comparison", async (req, res) => {
     try {
-      const { from, to } = req.query;
+      const { from, to, country } = req.query;
       
       const conditions = [];
       if (from) conditions.push(gte(productSearchTerms.date, from as string));
       if (to) conditions.push(lte(productSearchTerms.date, to as string));
+      if (country) conditions.push(eq(productSearchTerms.country, country as string));
       
       // First check what columns have data
       const sampleCheck = await db.execute(sql`
@@ -1597,6 +1598,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COUNT(sales30d) as has_sales30d
         FROM s_products_search_terms
         WHERE date >= ${from} AND date <= ${to}
+        ${country ? sql`AND country = ${country}` : sql``}
         LIMIT 1
       `);
       
