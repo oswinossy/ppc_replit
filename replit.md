@@ -36,6 +36,7 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - **EUR Currency Conversion**: All metrics displayed in EUR using daily ECB exchange rates; country-specific views show local currency.
     - **Placement Analysis**: Campaign-level performance by placement type (TOS, ROS, PP, UNKNOWN).
     - **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders.
+    - **Attribution Window**: Sponsored Products uses 30-day attribution (sales30d, purchases30d) to match Amazon's default dashboard view.
     - **Performance Charts**: Weekly aggregated ACOS and sales trends.
     - **Bid Recommendations**: 20% ACOS targeting for all search terms with confidence levels.
     - **Negative Keywords**: Auto-detection (≥20 clicks, $0 sales) with Excel export.

@@ -81,8 +81,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             currency: productSearchTerms.campaignBudgetCurrencyCode,
             clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
             cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
-            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
           })
           .from(productSearchTerms)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -231,8 +231,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             currency: productSearchTerms.campaignBudgetCurrencyCode,
             clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
             cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
-            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
           })
           .from(productSearchTerms)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -345,8 +345,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
           currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
         })
         .from(productSearchTerms)
@@ -456,8 +456,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
           currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
         })
         .from(productSearchTerms)
@@ -604,8 +604,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             keywordBid: sql<number>`MAX(${productSearchTerms.keywordBid})`,
             clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
             cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
-            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
             currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
           })
           .from(productSearchTerms)
@@ -744,8 +744,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             placement: productPlacement.placementClassification,
             clicks: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.clicks}, '')::numeric), 0)`,
             cost: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.cost}, '')::numeric), 0)`,
-            sales: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.sales7d}, '')::numeric), 0)`,
-            purchases: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.purchases7d}, '')::numeric), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.sales30d}, '')::numeric), 0)`,
+            purchases: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.purchases30d}, '')::numeric), 0)`,
           })
           .from(productPlacement)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -792,8 +792,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           impressions: sql<string>`NULLIF(${productPlacement.impressions}, '')`,
           clicks: sql<string>`NULLIF(${productPlacement.clicks}, '')`,
           cost: sql<string>`NULLIF(${productPlacement.cost}, '')`,
-          sales: sql<string>`NULLIF(${productPlacement.sales7d}, '')`,
-          purchases: sql<string>`NULLIF(${productPlacement.purchases7d}, '')`,
+          sales: sql<string>`NULLIF(${productPlacement.sales30d}, '')`,
+          purchases: sql<string>`NULLIF(${productPlacement.purchases30d}, '')`,
         })
         .from(productPlacement)
         .where(conditions.length > 0 ? and(...conditions) : undefined);
@@ -1019,7 +1019,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .select({
             date: sql<string>`${dateGroup}::text`,
             cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
             currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
             country: sql<string>`MAX(${productSearchTerms.country})`,
           })
@@ -1174,8 +1174,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             currency: productSearchTerms.campaignBudgetCurrencyCode,
             clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
             cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
-            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
           })
           .from(productSearchTerms)
           .where(baseConditions.length > 0 ? and(...baseConditions) : undefined)
@@ -1311,7 +1311,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
         })
         .from(productSearchTerms)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -1351,7 +1351,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
         })
         .from(productSearchTerms)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -1430,8 +1430,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           keywordBid: sql<number>`MAX(${productSearchTerms.keywordBid})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
           cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
         })
         .from(productSearchTerms)
         .where(productConditions.length > 0 ? and(...productConditions) : undefined)
@@ -1605,11 +1605,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await db
         .select({
           sales1d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales1d}, '')::numeric), 0)`,
-          sales7d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales7d}, '')::numeric), 0)`,
+          sales7d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
           sales14d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales14d}, '')::numeric), 0)`,
           sales30d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
           orders1d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases1d}, '')::numeric), 0)`,
-          orders7d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases7d}, '')::numeric), 0)`,
+          orders7d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
           orders14d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases14d}, '')::numeric), 0)`,
           orders30d: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
         })
