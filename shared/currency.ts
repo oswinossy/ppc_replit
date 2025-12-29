@@ -1,9 +1,9 @@
 /**
  * Currency utilities for multi-currency support
- * Supports EUR, USD, GBP, SEK, PLN
+ * Supports EUR, USD, GBP, SEK, PLN, JPY
  */
 
-export type SupportedCurrency = 'EUR' | 'USD' | 'GBP' | 'SEK' | 'PLN';
+export type SupportedCurrency = 'EUR' | 'USD' | 'GBP' | 'SEK' | 'PLN' | 'JPY';
 
 export interface CurrencyInfo {
   code: SupportedCurrency;
@@ -17,6 +17,7 @@ const CURRENCY_MAP: Record<SupportedCurrency, CurrencyInfo> = {
   GBP: { code: 'GBP', symbol: '£', name: 'British Pound' },
   SEK: { code: 'SEK', symbol: 'kr', name: 'Swedish Krona' },
   PLN: { code: 'PLN', symbol: 'zł', name: 'Polish Zloty' },
+  JPY: { code: 'JPY', symbol: '¥', name: 'Japanese Yen' },
 };
 
 /**
@@ -62,6 +63,7 @@ export const COUNTRY_TO_CURRENCY: Record<string, SupportedCurrency> = {
   UK: 'GBP',
   SE: 'SEK',
   PL: 'PLN',
+  JP: 'JPY',
 };
 
 /**

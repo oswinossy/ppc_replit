@@ -19,6 +19,7 @@ interface CurrencyMap {
   SEK: string;
   PLN: string;
   EUR: string;
+  JPY: string;
   [key: string]: string;
 }
 
@@ -28,6 +29,7 @@ const currencyToFrankfurterCode: CurrencyMap = {
   'SEK': 'SEK',
   'PLN': 'PLN',
   'EUR': 'EUR',
+  'JPY': 'JPY',
 };
 
 /**
@@ -174,6 +176,7 @@ function getDefaultRates(): Record<string, number> {
     GBP: 1.17, // ~1 GBP = 1.17 EUR
     SEK: 0.088, // ~1 SEK = 0.088 EUR
     PLN: 0.23, // ~1 PLN = 0.23 EUR
+    JPY: 0.0063, // ~1 JPY = 0.0063 EUR (~159 JPY per EUR)
   };
 }
 

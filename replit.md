@@ -50,10 +50,10 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - No sales (≥30 clicks): -25% decrease.
 - **Recommendation Engine**: Provides bid adjustments based on ACOS and sales data, with safeguards (20%-150% of base bid). Confidence levels (Extreme, High, Good, OK) are based on click volume.
 - **Currency Conversion System**:
-    - **Dashboard**: All metrics displayed in EUR with full conversion from all currencies (USD, GBP, SEK, PLN) using daily ECB exchange rates.
-    - **Country Views**: Metrics displayed in local currency (USD for US, GBP for GB, SEK for SE, PLN for PL, EUR for DE/FR/etc).
+    - **Dashboard**: All metrics displayed in EUR with full conversion from all currencies (USD, GBP, SEK, PLN, JPY) using daily ECB exchange rates.
+    - **Country Views**: Metrics displayed in local currency (USD for US, GBP for GB, SEK for SE, PLN for PL, JPY for JP, EUR for DE/FR/etc).
     - **Currency Preservation**: Navigation preserves currency throughout drill-down chain (Dashboard → Country → Campaign → Ad Group).
-    - **Currency Symbols**: Visual indicators display £, $, kr, zł, € symbols in country-specific views via CurrencyBadge component.
+    - **Currency Symbols**: Visual indicators display £, $, kr, zł, ¥, € symbols in country-specific views via CurrencyBadge component.
     - **API Support**: All endpoints (`/api/kpis`, `/api/chart-data`, `/api/campaigns`, `/api/search-terms`) support `convertToEur` parameter.
     - **Multi-Currency Guards**: Backend validates single-currency aggregation when `convertToEur=false` to prevent mixing USD+GBP+etc.
     - **Exchange Rates**: Uses Frankfurter API (api.frankfurter.app - European Central Bank) for daily rates with batch date-range support.
