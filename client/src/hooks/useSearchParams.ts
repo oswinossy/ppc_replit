@@ -13,6 +13,7 @@ export function useSearchParams() {
     const searchParams = new URLSearchParams(window.location.search);
     return {
       country: searchParams.get('country'),
+      campaignType: (searchParams.get('campaignType') as 'products' | 'brands' | 'display') || 'products',
       // Add more params here as needed
       get: (key: string) => searchParams.get(key),
       toString: () => searchParams.toString(),

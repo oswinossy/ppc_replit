@@ -294,7 +294,7 @@ export default function Dashboard() {
               ]}
               data={countries}
               onRowClick={(row) => {
-                setLocation(`/country/${row.code}`);
+                setLocation(`/country/${row.code}?campaignType=${campaignType}`);
               }}
             />
           ) : null}
