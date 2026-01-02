@@ -13,20 +13,23 @@ import { useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSearchParams } from "@/hooks/useSearchParams";
 
 export default function CountryView() {
   const [, params] = useRoute("/country/:code");
   const [, setLocation] = useLocation();
   const countryCode = params?.code || "FR";
+  const { campaignType } = useSearchParams();
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
-    queryKey: ['/api/kpis', countryCode, dateRange],
+    queryKey: ['/api/kpis', countryCode, campaignType, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         country: countryCode,
         from: dateRange.from, 
         to: dateRange.to,
+        campaignType,
         convertToEur: 'false' // Display in local currency for country-specific views
       });
       const response = await fetch(`/api/kpis?${params}`);
@@ -36,12 +39,13 @@ export default function CountryView() {
   });
 
   const { data: campaigns, isLoading: campaignsLoading } = useQuery({
-    queryKey: ['/api/campaigns', countryCode, dateRange],
+    queryKey: ['/api/campaigns', countryCode, campaignType, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         country: countryCode,
         from: dateRange.from, 
         to: dateRange.to,
+        campaignType,
         convertToEur: 'false' // Display in local currency for country-specific views
       });
       const response = await fetch(`/api/campaigns?${params}`);
@@ -51,13 +55,14 @@ export default function CountryView() {
   });
 
   const { data: chartData, isLoading: chartLoading } = useQuery({
-    queryKey: ['/api/chart-data', countryCode, dateRange],
+    queryKey: ['/api/chart-data', countryCode, campaignType, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         country: countryCode,
         from: dateRange.from, 
         to: dateRange.to,
         grain: 'weekly',
+        campaignType,
         convertToEur: 'false' // Display in local currency for country-specific views
       });
       const response = await fetch(`/api/chart-data?${params}`);
@@ -70,10 +75,15 @@ export default function CountryView() {
     const params = new URLSearchParams({ 
       country: countryCode,
       from: dateRange.from, 
-      to: dateRange.to 
+      to: dateRange.to,
+      campaignType
     });
     window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
   };
+  
+  // Get display name for campaign type
+  const campaignTypeLabel = campaignType === 'brands' ? 'Sponsored Brands' : 
+                            campaignType === 'display' ? 'Display' : 'Sponsored Products';
 
   const kpiCards = (kpis && !kpis.error) ? [
     { label: "Ad Sales", value: kpis.adSales?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0', currency: kpis.currency === 'EUR' ? '€' : kpis.currency },
@@ -91,8 +101,8 @@ export default function CountryView() {
           <div className="flex items-center gap-8">
             <h1 className="text-2xl font-bold" data-testid="brand-logo">Elan</h1>
             <BreadcrumbNav items={[
-              { label: "Dashboard", href: "/" },
-              { label: countryCode }
+              { label: "Dashboard", href: `/?campaignType=${campaignType}` },
+              { label: `${countryCode} (${campaignTypeLabel})` }
             ]} />
             <CurrencyBadge countryCode={countryCode} />
           </div>
@@ -166,7 +176,7 @@ export default function CountryView() {
               ]}
               data={campaigns}
               onRowClick={(row) => {
-                setLocation(`/campaign/${row.id}?country=${countryCode}`);
+                setLocation(`/campaign/${row.id}?country=${countryCode}&campaignType=${campaignType}`);
               }}
             />
           ) : null}
