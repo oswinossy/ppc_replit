@@ -419,95 +419,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Ad groups by campaign endpoint - combines brand + product
+  // Ad groups by campaign endpoint - filters by campaign type
   app.get("/api/ad-groups", async (req, res) => {
     try {
-      const { campaignId, from, to } = req.query;
+      const { campaignId, campaignType = 'products', from, to } = req.query;
       
-      // Query brand ad groups
-      const brandConditions = [];
-      if (campaignId) brandConditions.push(sql`${brandSearchTerms.campaignId}::text = ${campaignId}`);
-      if (from) brandConditions.push(gte(brandSearchTerms.date, from as string));
-      if (to) brandConditions.push(lte(brandSearchTerms.date, to as string));
+      let results: Array<{ adGroupId: any; adGroupName: string; clicks: number; cost: number; sales: number; orders: number; currency: string }> = [];
 
-      const brandResults = await db
-        .select({
-          adGroupId: brandSearchTerms.adGroupId,
-          adGroupName: sql<string>`MAX(${brandSearchTerms.adGroupName})`,
-          clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
-          orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
-          currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
-        })
-        .from(brandSearchTerms)
-        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
-        .groupBy(brandSearchTerms.adGroupId);
+      if (campaignType === 'brands') {
+        // Query brand ad groups only
+        const conditions = [];
+        if (campaignId) conditions.push(sql`${brandSearchTerms.campaignId}::text = ${campaignId}`);
+        if (from) conditions.push(gte(brandSearchTerms.date, from as string));
+        if (to) conditions.push(lte(brandSearchTerms.date, to as string));
 
-      // Query product ad groups
-      const productConditions = [];
-      if (campaignId) productConditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
-      if (from) productConditions.push(gte(productSearchTerms.date, from as string));
-      if (to) productConditions.push(lte(productSearchTerms.date, to as string));
+        results = await db
+          .select({
+            adGroupId: brandSearchTerms.adGroupId,
+            adGroupName: sql<string>`MAX(${brandSearchTerms.adGroupName})`,
+            clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+            cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+            sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+            orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+            currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
+          })
+          .from(brandSearchTerms)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .groupBy(brandSearchTerms.adGroupId);
+      } else if (campaignType === 'display') {
+        // Display campaigns don't have ad groups in the same structure
+        // Return empty array for display campaigns
+        results = [];
+      } else {
+        // Default: Query product ad groups only
+        const conditions = [];
+        if (campaignId) conditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
+        if (from) conditions.push(gte(productSearchTerms.date, from as string));
+        if (to) conditions.push(lte(productSearchTerms.date, to as string));
 
-      const productResults = await db
-        .select({
-          adGroupId: productSearchTerms.adGroupId,
-          adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
-          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
-          currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
-        })
-        .from(productSearchTerms)
-        .where(productConditions.length > 0 ? and(...productConditions) : undefined)
-        .groupBy(productSearchTerms.adGroupId);
+        results = await db
+          .select({
+            adGroupId: productSearchTerms.adGroupId,
+            adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
+            clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+            cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
+            currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
+          })
+          .from(productSearchTerms)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .groupBy(productSearchTerms.adGroupId);
+      }
 
-      // Combine by ad group ID
-      const adGroupMap = new Map();
-      
-      brandResults.forEach(row => {
-        if (row.adGroupId) {
-          adGroupMap.set(String(row.adGroupId), {
-            id: row.adGroupId,
-            adGroup: row.adGroupName,
-            clicks: Number(row.clicks),
-            cost: Number(row.cost),
-            sales: Number(row.sales),
-            orders: Number(row.orders),
-            currency: row.currency,
-          });
-        }
-      });
-
-      productResults.forEach(row => {
-        if (row.adGroupId) {
-          const key = String(row.adGroupId);
-          const existing = adGroupMap.get(key);
-          if (existing) {
-            existing.clicks += Number(row.clicks);
-            existing.cost += Number(row.cost);
-            existing.sales += Number(row.sales);
-            existing.orders += Number(row.orders);
-          } else {
-            adGroupMap.set(key, {
-              id: row.adGroupId,
-              adGroup: row.adGroupName,
-              clicks: Number(row.clicks),
-              cost: Number(row.cost),
-              sales: Number(row.sales),
-              orders: Number(row.orders),
-              currency: row.currency,
-            });
-          }
-        }
-      });
-
-      const adGroups = Array.from(adGroupMap.values())
+      const adGroups = results
+        .filter(row => row.adGroupId)
         .map(row => ({
-          ...row,
-          acos: calculateACOS(row.cost, row.sales),
+          id: row.adGroupId,
+          adGroup: row.adGroupName,
+          clicks: Number(row.clicks),
+          cost: Number(row.cost),
+          sales: Number(row.sales),
+          orders: Number(row.orders),
+          currency: row.currency,
+          acos: calculateACOS(Number(row.cost), Number(row.sales)),
         }))
         .sort((a, b) => b.sales - a.sales);
 
