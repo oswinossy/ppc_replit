@@ -23,19 +23,24 @@ export default function CampaignView() {
   const [, setLocation] = useLocation();
   const campaignId = params?.id || "";
   
-  // Extract country from query parameters
-  const { country: countryCode } = useSearchParams();
+  // Extract country and campaignType from query parameters
+  const { country: countryCode, campaignType } = useSearchParams();
+  
+  // Get display name for campaign type
+  const campaignTypeLabel = campaignType === 'brands' ? 'Sponsored Brands' : 
+                            campaignType === 'display' ? 'Display' : 'Sponsored Products';
   
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
   const [viewMode, setViewMode] = useState<ViewMode>('search-terms');
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
-    queryKey: ['/api/kpis', campaignId, countryCode, dateRange],
+    queryKey: ['/api/kpis', campaignId, countryCode, campaignType, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
         from: dateRange.from, 
-        to: dateRange.to 
+        to: dateRange.to,
+        campaignType
       });
       // When country is present, display in local currency
       if (countryCode) {
@@ -49,12 +54,13 @@ export default function CampaignView() {
   });
 
   const { data: adGroups, isLoading: adGroupsLoading } = useQuery({
-    queryKey: ['/api/ad-groups', campaignId, dateRange],
+    queryKey: ['/api/ad-groups', campaignId, campaignType, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
         from: dateRange.from, 
-        to: dateRange.to 
+        to: dateRange.to,
+        campaignType
       });
       const response = await fetch(`/api/ad-groups?${params}`);
       return response.json();
@@ -63,13 +69,14 @@ export default function CampaignView() {
   });
 
   const { data: placements, isLoading: placementsLoading } = useQuery({
-    queryKey: ['/api/campaign-placements', campaignId, dateRange],
+    queryKey: ['/api/campaign-placements', campaignId, campaignType, dateRange],
     enabled: viewMode === 'placements',
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
         from: dateRange.from, 
-        to: dateRange.to 
+        to: dateRange.to,
+        campaignType
       });
       const response = await fetch(`/api/campaign-placements?${params}`);
       return response.json();
@@ -78,13 +85,14 @@ export default function CampaignView() {
   });
 
   const { data: chartData, isLoading: chartLoading} = useQuery({
-    queryKey: ['/api/chart-data', campaignId, countryCode, dateRange],
+    queryKey: ['/api/chart-data', campaignId, countryCode, campaignType, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
         from: dateRange.from, 
         to: dateRange.to,
-        grain: 'weekly'
+        grain: 'weekly',
+        campaignType
       });
       // When country is present, display in local currency
       if (countryCode) {
@@ -101,7 +109,8 @@ export default function CampaignView() {
     const params = new URLSearchParams({ 
       campaignId,
       from: dateRange.from, 
-      to: dateRange.to 
+      to: dateRange.to,
+      campaignType
     });
     window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
   };
@@ -122,9 +131,10 @@ export default function CampaignView() {
           <div className="flex items-center gap-8">
             <h1 className="text-2xl font-bold" data-testid="brand-logo">Elan</h1>
             <BreadcrumbNav items={[
-              { label: "Dashboard", href: "/" },
-              { label: "Campaign" }
-            ]} />
+              { label: "Dashboard", href: `/?campaignType=${campaignType}` },
+              { label: countryCode || "", href: countryCode ? `/country/${countryCode}?campaignType=${campaignType}` : undefined },
+              { label: `Campaign (${campaignTypeLabel})` }
+            ].filter(item => item.label)} />
             <CurrencyBadge countryCode={countryCode} />
           </div>
           <div className="flex items-center gap-4">
@@ -221,8 +231,8 @@ export default function CampaignView() {
                 data={adGroups}
                 onRowClick={(row) => {
                   const url = countryCode 
-                    ? `/ad-group/${row.id}?country=${countryCode}`
-                    : `/ad-group/${row.id}`;
+                    ? `/ad-group/${row.id}?country=${countryCode}&campaignType=${campaignType}`
+                    : `/ad-group/${row.id}?campaignType=${campaignType}`;
                   setLocation(url);
                 }}
               />

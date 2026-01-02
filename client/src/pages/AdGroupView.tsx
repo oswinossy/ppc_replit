@@ -22,14 +22,15 @@ export default function AdGroupView() {
   const [, params] = useRoute("/ad-group/:id");
   const adGroupId = params?.id || "";
   
-  // Extract country from query parameters
-  const { country: countryCode } = useSearchParams();
+  // Extract country and campaignType from query parameters
+  const { country: countryCode, campaignType } = useSearchParams();
   
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
   const [showRecommendations, setShowRecommendations] = useState(false);
   
-  // Campaign type is now fixed to 'products' for Ad Group view
-  const campaignType = 'products';
+  // Get display name for campaign type
+  const campaignTypeLabel = campaignType === 'brands' ? 'Sponsored Brands' : 
+                            campaignType === 'display' ? 'Display' : 'Sponsored Products';
   const { toast } = useToast();
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
@@ -155,9 +156,10 @@ export default function AdGroupView() {
           <div className="flex items-center gap-8">
             <h1 className="text-2xl font-bold" data-testid="brand-logo">Elan</h1>
             <BreadcrumbNav items={[
-              { label: "Dashboard", href: "/" },
-              { label: "Ad Group" }
-            ]} />
+              { label: "Dashboard", href: `/?campaignType=${campaignType}` },
+              { label: countryCode || "", href: countryCode ? `/country/${countryCode}?campaignType=${campaignType}` : undefined },
+              { label: `Ad Group (${campaignTypeLabel})` }
+            ].filter(item => item.label)} />
             <CurrencyBadge countryCode={countryCode} />
           </div>
           <div className="flex items-center gap-4">
