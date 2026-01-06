@@ -595,19 +595,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const cpc = calculateCPC(row.cost, row.clicks);
           const targetAcos = 20;
           
-          // Calculate recommendation for ALL terms (not just 30+ clicks)
+          // Only calculate recommendation for terms with 30+ clicks (minimum threshold)
           const baseBid = row.keywordBid || cpc || 1.0;
-          let recommendedBid = baseBid;
+          let recommendedBid: number | null = null;
+          let bidChange: number | null = null;
           let confidence = getConfidenceLevel(row.clicks).label;
           
-          // Apply PPC AI logic for all terms with any data
-          if (row.clicks > 0) {
-            if (row.sales === 0 && row.clicks >= 20) {
-              // No sales with significant clicks - reduce bid
-              recommendedBid = baseBid * 0.85; // -15%
+          // Apply PPC AI logic only for terms with 30+ clicks
+          if (row.clicks >= 30) {
+            recommendedBid = baseBid;
+            
+            if (row.sales === 0) {
+              // No sales with 30+ clicks - reduce bid
+              const reduction = row.clicks >= 100 ? 0.70 : 0.85; // -30% or -15%
+              recommendedBid = baseBid * reduction;
             } else if (acos > 0 && acos <= targetAcos * 0.8) {
               // ACOS well below target - increase bid
-              const increase = row.clicks >= 100 ? 1.15 : 1.10;
+              const increase = row.clicks >= 300 ? 1.20 : row.clicks >= 100 ? 1.15 : 1.10;
               recommendedBid = baseBid * increase;
             } else if (acos > 0) {
               // Standard formula: current bid × (target ACOS / current ACOS)
@@ -619,9 +623,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const maxBid = baseBid * 1.50;
             recommendedBid = Math.max(minBid, Math.min(maxBid, recommendedBid));
             recommendedBid = Math.round(recommendedBid * 100) / 100;
+            bidChange = baseBid > 0 ? ((recommendedBid - baseBid) / baseBid) * 100 : 0;
           }
-          
-          const bidChange = baseBid > 0 ? ((recommendedBid - baseBid) / baseBid) * 100 : 0;
 
           return {
             searchTerm: row.searchTerm,
@@ -635,8 +638,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cpc,
             cvr: Number(row.clicks) > 0 ? (Number(row.orders) / Number(row.clicks)) * 100 : 0,
             currentBid: Number(row.keywordBid || 0),
-            recommendedBid: Number(recommendedBid),
-            bidChange: Number(bidChange),
+            recommendedBid: recommendedBid, // null if <30 clicks
+            bidChange: bidChange, // null if <30 clicks
             confidence: confidence,
             currency: row.currency,
           };
