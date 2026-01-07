@@ -81,6 +81,19 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - API responses include calculated fields: `cpc`, `cvr`, `acos`.
     - Frontend renders use null guards for numeric values: `(val ?? 0).toFixed(2)`.
 
+### AI Analytics Agent
+- **Model**: Anthropic Claude claude-sonnet-4-20250514 via @anthropic-ai/sdk
+- **Endpoint**: `/api/agent/query` with SSE streaming support
+- **Tools Available**:
+    - `get_kpis`: Fetch aggregate KPIs (sales, ACOS, cost, clicks, orders) with date range and campaign type filters
+    - `get_campaigns`: List campaigns with performance metrics, sorted by cost
+    - `get_countries_performance`: Country-level breakdown with EUR conversion
+    - `get_top_search_terms`: Search terms ranked by cost with bid recommendations
+    - `get_negative_keyword_candidates`: Identify underperforming keywords (≥20 clicks, $0 sales)
+- **Response Time**: ~10-11 seconds for tool-using queries
+- **Frontend**: Floating chat button (AgentChat component) with message history and suggested questions
+
 ## External Dependencies
 - **Database**: Supabase (PostgreSQL).
 - **Exchange Rates API**: Frankfurter API (European Central Bank rates).
+- **AI Provider**: Anthropic API (ANTHROPIC_API_KEY in Replit Secrets).
