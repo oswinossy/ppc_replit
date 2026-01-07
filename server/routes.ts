@@ -9,6 +9,7 @@ import { getExchangeRatesForDate, getExchangeRatesForRange, convertToEur } from 
 import { normalizePlacementName, getCurrencyForCountry } from "@shared/currency";
 import * as XLSX from 'xlsx';
 import { getCached, setCache, generateCacheKey } from "./cache";
+import { queryAgent, queryAgentStream } from "./agent";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
@@ -1621,6 +1622,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Attribution comparison error:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // AI Agent query endpoint - natural language PPC analytics
+  app.post("/api/agent/query", async (req, res) => {
+    try {
+      const { message, stream = false } = req.body;
+      
+      if (!message || typeof message !== 'string') {
+        return res.status(400).json({ error: 'Message is required' });
+      }
+      
+      if (!process.env.ANTHROPIC_API_KEY) {
+        return res.status(500).json({ error: 'Anthropic API key not configured' });
+      }
+      
+      if (stream) {
+        // Streaming response
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        
+        try {
+          for await (const chunk of queryAgentStream(message)) {
+            res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+          }
+          res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+          res.end();
+        } catch (streamError: any) {
+          console.error('Agent streaming error:', streamError);
+          res.write(`data: ${JSON.stringify({ error: streamError.message })}\n\n`);
+          res.end();
+        }
+      } else {
+        // Non-streaming response
+        const response = await queryAgent(message);
+        res.json({ response });
+      }
+    } catch (error: any) {
+      console.error('Agent query error:', error);
+      res.status(500).json({ error: error.message || 'Failed to process query' });
     }
   });
 
