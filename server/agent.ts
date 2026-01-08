@@ -659,7 +659,7 @@ export async function queryAgent(userMessage: string): Promise<string> {
   ];
   
   let response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-opus-4-20250514",
     max_tokens: 4096,
     system: SYSTEM_PROMPT,
     tools,
@@ -689,7 +689,7 @@ export async function queryAgent(userMessage: string): Promise<string> {
     
     // Get next response
     response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-opus-4-20250514",
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       tools,
@@ -715,7 +715,7 @@ export async function* queryAgentStream(userMessage: string): AsyncGenerator<str
   
   while (continueLoop) {
     const stream = await client.messages.stream({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-opus-4-20250514",
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       tools,

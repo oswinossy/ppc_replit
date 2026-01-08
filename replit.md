@@ -82,7 +82,7 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - Frontend renders use null guards for numeric values: `(val ?? 0).toFixed(2)`.
 
 ### AI Analytics Agent
-- **Model**: Anthropic Claude claude-sonnet-4-20250514 via @anthropic-ai/sdk
+- **Model**: Anthropic Claude Opus 4.5 (claude-opus-4-20250514) via @anthropic-ai/sdk
 - **Endpoint**: `/api/agent/query` with SSE streaming support
 - **Tools Available (8 total)**:
     - `get_kpis`: Fetch aggregate KPIs (sales, ACOS, cost, clicks, orders) with date range and campaign type filters
