@@ -115,6 +115,18 @@ export default function CampaignView() {
     window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
   };
 
+  const handleExportRecommendations = async () => {
+    const params = new URLSearchParams({ 
+      campaignId,
+      from: dateRange.from, 
+      to: dateRange.to
+    });
+    if (countryCode) {
+      params.append('country', countryCode);
+    }
+    window.open(`/api/exports/recommendations.csv?${params}`, '_blank');
+  };
+
   const kpiCards = (kpis && !kpis.error) ? [
     { label: "Ad Sales", value: kpis.adSales?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0', currency: kpis.currency === 'EUR' ? '€' : kpis.currency },
     { label: "ACOS", value: `${kpis.acos?.toFixed(1) || '0'}%` },
@@ -142,8 +154,18 @@ export default function CampaignView() {
               variant="outline" 
               size="sm" 
               className="gap-2" 
+              onClick={handleExportRecommendations}
+              data-testid="button-export-recommendations"
+            >
+              <Download className="h-4 w-4" />
+              Export Bid Recommendations
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-2" 
               onClick={handleExportNegatives}
-              data-testid="button-export"
+              data-testid="button-export-negatives"
             >
               <Download className="h-4 w-4" />
               Export Negatives

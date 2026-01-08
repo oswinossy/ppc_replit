@@ -1392,21 +1392,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Export bid recommendations as CSV
+  // Export bid recommendations as CSV - supports country, campaign, and ad group level exports
   app.get("/api/exports/recommendations.csv", async (req, res) => {
     try {
-      const { adGroupId, campaignId, from, to } = req.query;
+      const { adGroupId, campaignId, country, from, to } = req.query;
       
       const conditions = [];
       if (adGroupId) conditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
       if (campaignId) conditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
+      if (country) conditions.push(sql`${productSearchTerms.country} = ${country}`);
       if (from) conditions.push(gte(productSearchTerms.date, from as string));
       if (to) conditions.push(lte(productSearchTerms.date, to as string));
 
+      // Include campaign and ad group names for context in country/campaign-level exports
+      // Group by all context fields to ensure correct attribution
       const results = await db
         .select({
           searchTerm: productSearchTerms.searchTerm,
           matchType: productSearchTerms.matchType,
+          campaignName: productSearchTerms.campaignName,
+          adGroupName: productSearchTerms.adGroupName,
           keywordBid: sql<number>`MAX(${productSearchTerms.keywordBid})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
           impressions: sql<number>`0`,
@@ -1416,7 +1421,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .from(productSearchTerms)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(productSearchTerms.searchTerm, productSearchTerms.matchType);
+        .groupBy(
+          productSearchTerms.searchTerm, 
+          productSearchTerms.matchType,
+          productSearchTerms.campaignName,
+          productSearchTerms.adGroupName
+        );
 
       const termsData = results.map(row => ({
         searchTerm: row.searchTerm || '',
@@ -1428,13 +1438,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currentBid: Number(row.keywordBid || 0) || null,
         cpc: Number(row.clicks) > 0 ? Number(row.cost) / Number(row.clicks) : 0,
         matchType: row.matchType || undefined,
+        campaignName: row.campaignName || undefined,
+        adGroupName: row.adGroupName || undefined,
       }));
 
       const recommendations = generateBulkRecommendations(termsData, 20);
-      const csvContent = formatRecommendationsForCSV(recommendations);
+      
+      // Generate CSV with additional context columns for country/campaign exports
+      const includeContext = !!(country || (campaignId && !adGroupId));
+      const csvContent = formatRecommendationsForCSV(recommendations, includeContext);
+
+      // Dynamic filename based on export level
+      let filename = 'bid-recommendations';
+      if (country) filename = `bid-recommendations-${country}`;
+      else if (campaignId) filename = `bid-recommendations-campaign-${campaignId}`;
+      else if (adGroupId) filename = `bid-recommendations-adgroup-${adGroupId}`;
 
       res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', 'attachment; filename=bid-recommendations.csv');
+      res.setHeader('Content-Disposition', `attachment; filename=${filename}.csv`);
       res.send(csvContent);
     } catch (error) {
       console.error('Export recommendations error:', error);

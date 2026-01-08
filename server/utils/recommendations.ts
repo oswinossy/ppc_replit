@@ -10,6 +10,8 @@ interface SearchTermData {
   currentBid: number | null;
   cpc: number;
   matchType?: string;
+  campaignName?: string;
+  adGroupName?: string;
 }
 
 interface BidRecommendation {
@@ -32,6 +34,8 @@ interface BidRecommendation {
   confidenceLevel: number;
   action: 'increase' | 'decrease' | 'maintain' | 'review';
   matchType?: string;
+  campaignName?: string;
+  adGroupName?: string;
 }
 
 const TARGET_ACOS = 20;
@@ -47,7 +51,7 @@ export function generateBidRecommendation(
   targetAcos: number = TARGET_ACOS,
   campaignMedianCPC: number = 1.0
 ): BidRecommendation | null {
-  const { searchTerm, clicks, impressions, cost, sales, orders, currentBid, cpc, matchType } = term;
+  const { searchTerm, clicks, impressions, cost, sales, orders, currentBid, cpc, matchType, campaignName, adGroupName } = term;
   
   const lowerBound = targetAcos * 0.8;
   const upperBound = targetAcos * 1.1;
@@ -137,6 +141,8 @@ export function generateBidRecommendation(
     confidenceLevel: confidence.level,
     action,
     matchType,
+    campaignName,
+    adGroupName,
   };
 }
 
@@ -240,8 +246,8 @@ export function detectNegativeKeywords(
   });
 }
 
-export function formatRecommendationsForCSV(recommendations: BidRecommendation[]): string {
-  const headers = [
+export function formatRecommendationsForCSV(recommendations: BidRecommendation[], includeContext: boolean = false): string {
+  const baseHeaders = [
     'Search Term',
     'Match Type',
     'Current Bid',
@@ -261,25 +267,40 @@ export function formatRecommendationsForCSV(recommendations: BidRecommendation[]
     'Rationale'
   ];
   
-  const rows = recommendations.map(rec => [
-    `"${rec.searchTerm.replace(/"/g, '""')}"`,
-    rec.matchType || '',
-    rec.currentBid.toFixed(2),
-    rec.proposedBid.toFixed(2),
-    rec.deltaPercent.toFixed(1),
-    rec.action,
-    rec.clicks,
-    rec.impressions,
-    rec.cost.toFixed(2),
-    rec.sales.toFixed(2),
-    rec.orders,
-    rec.acos.toFixed(1),
-    rec.cvr.toFixed(2),
-    rec.cpc.toFixed(2),
-    rec.targetAcos,
-    rec.confidence,
-    `"${rec.rationale.replace(/"/g, '""')}"`
-  ].join(','));
+  const headers = includeContext 
+    ? ['Campaign Name', 'Ad Group Name', ...baseHeaders]
+    : baseHeaders;
+  
+  const rows = recommendations.map(rec => {
+    const baseRow = [
+      `"${rec.searchTerm.replace(/"/g, '""')}"`,
+      rec.matchType || '',
+      rec.currentBid.toFixed(2),
+      rec.proposedBid.toFixed(2),
+      rec.deltaPercent.toFixed(1),
+      rec.action,
+      rec.clicks,
+      rec.impressions,
+      rec.cost.toFixed(2),
+      rec.sales.toFixed(2),
+      rec.orders,
+      rec.acos.toFixed(1),
+      rec.cvr.toFixed(2),
+      rec.cpc.toFixed(2),
+      rec.targetAcos,
+      rec.confidence,
+      `"${rec.rationale.replace(/"/g, '""')}"`
+    ];
+    
+    if (includeContext) {
+      return [
+        `"${(rec.campaignName || '').replace(/"/g, '""')}"`,
+        `"${(rec.adGroupName || '').replace(/"/g, '""')}"`,
+        ...baseRow
+      ].join(',');
+    }
+    return baseRow.join(',');
+  });
   
   return [headers.join(','), ...rows].join('\n');
 }

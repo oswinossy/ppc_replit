@@ -80,6 +80,15 @@ export default function CountryView() {
     });
     window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
   };
+
+  const handleExportRecommendations = async () => {
+    const params = new URLSearchParams({ 
+      country: countryCode,
+      from: dateRange.from, 
+      to: dateRange.to
+    });
+    window.open(`/api/exports/recommendations.csv?${params}`, '_blank');
+  };
   
   // Get display name for campaign type
   const campaignTypeLabel = campaignType === 'brands' ? 'Sponsored Brands' : 
@@ -111,8 +120,18 @@ export default function CountryView() {
               variant="outline" 
               size="sm" 
               className="gap-2" 
+              onClick={handleExportRecommendations}
+              data-testid="button-export-recommendations"
+            >
+              <Download className="h-4 w-4" />
+              Export Bid Recommendations
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-2" 
               onClick={handleExportNegatives}
-              data-testid="button-export"
+              data-testid="button-export-negatives"
             >
               <Download className="h-4 w-4" />
               Export Negatives
