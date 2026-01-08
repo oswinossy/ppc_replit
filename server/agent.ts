@@ -692,9 +692,13 @@ async function executeGetDataCoverage(params: { from: string; to: string; countr
     allDates.push(d.toISOString().split('T')[0]);
   }
   
+  // Tables with TEXT date columns that need casting
+  const textDateTables = ['products_search_terms', 'products_placement'];
+  
   for (const tableName of tablesToCheck) {
     let table: any;
     let dateField: any;
+    const needsCasting = textDateTables.includes(tableName);
     
     switch (tableName) {
       case 'products_search_terms':
@@ -725,19 +729,31 @@ async function executeGetDataCoverage(params: { from: string; to: string; countr
         continue;
     }
     
+    // Use SQL casting for TEXT date columns to ensure proper date comparison
     const conditions = [];
-    conditions.push(gte(dateField, from));
-    conditions.push(lte(dateField, to));
+    if (needsCasting) {
+      conditions.push(sql`${dateField}::date >= ${from}::date`);
+      conditions.push(sql`${dateField}::date <= ${to}::date`);
+    } else {
+      conditions.push(gte(dateField, from));
+      conditions.push(lte(dateField, to));
+    }
     if (country && table.country) conditions.push(eq(table.country, country));
+    
+    // Cast date to proper format for grouping - ensures consistent YYYY-MM-DD format
+    // Use the same expression for both SELECT and GROUP BY to avoid type mismatches
+    const dateExpression = needsCasting 
+      ? sql`${dateField}::date` 
+      : sql`${dateField}::date`;
     
     const dateResults = await db
       .select({
-        date: sql<string>`${dateField}::text`,
+        date: sql<string>`to_char(${dateExpression}, 'YYYY-MM-DD')`,
         count: sql<number>`COUNT(*)`,
       })
       .from(table)
       .where(and(...conditions))
-      .groupBy(dateField);
+      .groupBy(dateExpression);
     
     const dateMap: Record<string, number> = {};
     let totalRecords = 0;
@@ -819,15 +835,16 @@ async function executeGetDailyBreakdown(params: { from: string; to: string; coun
       .groupBy(displayMatchedTarget.date)
       .orderBy(displayMatchedTarget.date);
   } else {
+    // Products table has TEXT date column - need to cast for proper comparison
     const conditions = [];
-    conditions.push(gte(productSearchTerms.date, from));
-    conditions.push(lte(productSearchTerms.date, to));
+    conditions.push(sql`${productSearchTerms.date}::date >= ${from}::date`);
+    conditions.push(sql`${productSearchTerms.date}::date <= ${to}::date`);
     if (country) conditions.push(eq(productSearchTerms.country, country));
     if (campaignId) conditions.push(eq(productSearchTerms.campaignId, campaignId));
     
     results = await db
       .select({
-        date: productSearchTerms.date,
+        date: sql<string>`to_char(${productSearchTerms.date}::date, 'YYYY-MM-DD')`,
         clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
         cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
         sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
@@ -836,8 +853,8 @@ async function executeGetDailyBreakdown(params: { from: string; to: string; coun
       })
       .from(productSearchTerms)
       .where(and(...conditions))
-      .groupBy(productSearchTerms.date)
-      .orderBy(productSearchTerms.date);
+      .groupBy(sql`${productSearchTerms.date}::date`)
+      .orderBy(sql`${productSearchTerms.date}::date`);
   }
   
   return results.map(row => ({
