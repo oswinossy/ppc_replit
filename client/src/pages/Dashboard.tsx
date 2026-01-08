@@ -6,6 +6,7 @@ import BreadcrumbNav from "@/components/BreadcrumbNav";
 import FilterChip from "@/components/FilterChip";
 import ThemeToggle from "@/components/ThemeToggle";
 import ACOSBadge from "@/components/ACOSBadge";
+import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -99,11 +100,13 @@ export default function Dashboard() {
     const days = differenceInDays(parseISO(dateRange.to), parseISO(dateRange.from)) + 1;
     
     // Check if it's a standard period
-    if (days === 7) return "Last 7 days";
     if (days === 14) return "Last 14 days";
     if (days === 30) return "Last 30 days";
     if (days === 60) return "Last 60 days";
-    if (days === 90) return "Last 90 days";
+    if (days === 365) return "Last 365 days";
+    
+    // Check if it's lifetime (starts from Oct 1, 2024)
+    if (dateRange.from === '2024-10-01') return "Lifetime";
     
     // Custom period
     return `${format(parseISO(dateRange.from), 'MMM dd')} - ${format(parseISO(dateRange.to), 'MMM dd, yyyy')}`;
@@ -209,6 +212,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-4">
             <TimeRangePicker value={dateRange} onChange={setDateRange} />
+            <AgentChat />
           </div>
           <div className="flex items-center gap-2">
             <FilterChip label="Period" value={getPeriodLabel()} />

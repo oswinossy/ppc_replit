@@ -7,6 +7,7 @@ import FilterChip from "@/components/FilterChip";
 import ThemeToggle from "@/components/ThemeToggle";
 import ACOSBadge from "@/components/ACOSBadge";
 import CurrencyBadge from "@/components/CurrencyBadge";
+import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
 import { Download, TrendingUp } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
@@ -143,7 +144,10 @@ export default function CountryView() {
 
       <div className="sticky top-16 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center justify-between px-6 py-3">
-          <TimeRangePicker value={dateRange} onChange={setDateRange} />
+          <div className="flex items-center gap-4">
+            <TimeRangePicker value={dateRange} onChange={setDateRange} />
+            <AgentChat />
+          </div>
           <div className="flex items-center gap-2">
             <FilterChip label="Country" value={countryCode} />
             <FilterChip label="Period" value="Last 60 days" />

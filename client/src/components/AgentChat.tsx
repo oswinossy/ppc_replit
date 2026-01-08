@@ -131,17 +131,19 @@ export function AgentChat() {
     return (
       <Button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-50"
-        size="icon"
+        variant="outline"
+        size="sm"
+        className="gap-2 h-8"
         data-testid="button-open-chat"
       >
-        <Sparkles className="h-6 w-6" />
+        <Sparkles className="h-4 w-4" />
+        Ask AI
       </Button>
     );
   }
 
   return (
-    <Card className="fixed bottom-6 right-6 w-96 h-[600px] shadow-2xl z-50 flex flex-col">
+    <Card className="fixed top-24 right-6 w-96 h-[600px] shadow-2xl z-50 flex flex-col">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 gap-2 pb-3 border-b">
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5 text-primary" />

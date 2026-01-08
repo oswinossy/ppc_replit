@@ -7,6 +7,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import ACOSBadge from "@/components/ACOSBadge";
 import RecommendationCard from "@/components/RecommendationCard";
 import CurrencyBadge from "@/components/CurrencyBadge";
+import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
 import { Download, Sparkles } from "lucide-react";
 import { useRoute, useLocation } from "wouter";
@@ -200,7 +201,10 @@ export default function AdGroupView() {
 
       <div className="sticky top-16 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center justify-between px-6 py-3">
-          <TimeRangePicker value={dateRange} onChange={setDateRange} />
+          <div className="flex items-center gap-4">
+            <TimeRangePicker value={dateRange} onChange={setDateRange} />
+            <AgentChat />
+          </div>
           <div className="flex items-center gap-2">
             <FilterChip label="Ad Group" value={adGroupId} />
           </div>

@@ -8,15 +8,18 @@ import { DateRange } from "react-day-picker";
 
 interface TimeRange {
   label: string;
-  days: number;
+  days: number | "lifetime";
 }
 
+// Lifetime starts from October 1, 2024
+const LIFETIME_START = new Date(2024, 9, 1); // Month is 0-indexed, so 9 = October
+
 const timeRanges: TimeRange[] = [
-  { label: "7D", days: 7 },
   { label: "14D", days: 14 },
   { label: "30D", days: 30 },
   { label: "60D", days: 60 },
-  { label: "90D", days: 90 },
+  { label: "365D", days: 365 },
+  { label: "Lifetime", days: "lifetime" },
 ];
 
 interface TimeRangePickerProps {
@@ -25,14 +28,20 @@ interface TimeRangePickerProps {
 }
 
 export default function TimeRangePicker({ value, onChange }: TimeRangePickerProps) {
-  const [selected, setSelected] = useState<number | "custom">(60);
+  const [selected, setSelected] = useState<number | "custom" | "lifetime">(60);
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
   const [isCustomOpen, setIsCustomOpen] = useState(false);
 
-  const handlePresetSelect = (days: number) => {
+  const handlePresetSelect = (days: number | "lifetime") => {
     setSelected(days);
     const to = new Date();
-    const from = subDays(to, days - 1);
+    
+    let from: Date;
+    if (days === "lifetime") {
+      from = LIFETIME_START;
+    } else {
+      from = subDays(to, days - 1);
+    }
     
     if (onChange) {
       onChange({
@@ -68,6 +77,9 @@ export default function TimeRangePicker({ value, onChange }: TimeRangePickerProp
     if (selected === "custom" && customDateRange?.from && customDateRange?.to) {
       return `${format(customDateRange.from, 'MMM dd')} - ${format(customDateRange.to, 'MMM dd, yyyy')}`;
     }
+    if (selected === "lifetime") {
+      return `Since Oct 1, 2024`;
+    }
     return `Last ${selected} days`;
   };
 
@@ -76,12 +88,12 @@ export default function TimeRangePicker({ value, onChange }: TimeRangePickerProp
       <div className="flex items-center gap-1 border rounded-md p-1">
         {timeRanges.map((range) => (
           <Button
-            key={range.days}
+            key={String(range.days)}
             size="sm"
             variant={selected === range.days ? "default" : "ghost"}
             onClick={() => handlePresetSelect(range.days)}
             className="h-8"
-            data-testid={`time-range-${range.days}d`}
+            data-testid={`time-range-${range.days === "lifetime" ? "lifetime" : range.days + "d"}`}
           >
             {range.label}
           </Button>

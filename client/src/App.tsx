@@ -8,7 +8,6 @@ import CountryView from "@/pages/CountryView";
 import CampaignView from "@/pages/CampaignView";
 import AdGroupView from "@/pages/AdGroupView";
 import NotFound from "@/pages/not-found";
-import { AgentChat } from "@/components/AgentChat";
 
 function Router() {
   return (
@@ -28,7 +27,6 @@ function App() {
       <TooltipProvider>
         <Toaster />
         <Router />
-        <AgentChat />
       </TooltipProvider>
     </QueryClientProvider>
   );
