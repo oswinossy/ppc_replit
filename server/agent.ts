@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "./db";
-import { brandSearchTerms, productSearchTerms, displayMatchedTarget } from "@shared/schema";
+import { brandSearchTerms, productSearchTerms, displayMatchedTarget, brandPlacement, productPlacement, displayTargeting } from "@shared/schema";
 import { sql, eq, gte, lte, and } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR } from "./utils/calculations";
 
@@ -23,6 +23,8 @@ You have access to tools that query real campaign data from the database. The da
 - Metrics: clicks, cost, sales, orders, ACOS, CPC, CVR
 - Campaign types: Sponsored Products (30-day attribution), Sponsored Brands, Display
 - All monetary values are displayed in EUR (converted using ECB exchange rates)
+- Placement-level performance data (Top of Search, Product Pages, Rest of Search, Off Amazon)
+- Display targeting data with targeting expressions and performance metrics
 
 ## Guidelines
 1. Always use the available tools to fetch real data before answering questions
@@ -182,6 +184,88 @@ const tools: Anthropic.Tool[] = [
         minClicks: {
           type: "number",
           description: "Minimum clicks threshold. Default 20."
+        }
+      },
+      required: ["from", "to"]
+    }
+  },
+  {
+    name: "get_product_placements",
+    description: "Get Sponsored Products placement-level performance data. Shows performance breakdown by placement type (Top of Search, Product Pages, Rest of Search).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        from: {
+          type: "string",
+          description: "Start date in YYYY-MM-DD format"
+        },
+        to: {
+          type: "string",
+          description: "End date in YYYY-MM-DD format"
+        },
+        country: {
+          type: "string",
+          description: "Optional country code"
+        },
+        campaignId: {
+          type: "number",
+          description: "Optional campaign ID to filter by specific campaign"
+        }
+      },
+      required: ["from", "to"]
+    }
+  },
+  {
+    name: "get_brand_placements",
+    description: "Get Sponsored Brands placement-level performance data. Shows impressions, clicks, cost, sales by placement.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        from: {
+          type: "string",
+          description: "Start date in YYYY-MM-DD format"
+        },
+        to: {
+          type: "string",
+          description: "End date in YYYY-MM-DD format"
+        },
+        country: {
+          type: "string",
+          description: "Optional country code"
+        },
+        campaignId: {
+          type: "number",
+          description: "Optional campaign ID to filter by specific campaign"
+        }
+      },
+      required: ["from", "to"]
+    }
+  },
+  {
+    name: "get_display_targeting",
+    description: "Get Display campaign targeting performance data. Shows performance by targeting expression (audience, product targeting, etc.).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        from: {
+          type: "string",
+          description: "Start date in YYYY-MM-DD format"
+        },
+        to: {
+          type: "string",
+          description: "End date in YYYY-MM-DD format"
+        },
+        country: {
+          type: "string",
+          description: "Optional country code"
+        },
+        campaignId: {
+          type: "number",
+          description: "Optional campaign ID to filter by specific campaign"
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of results. Default 20."
         }
       },
       required: ["from", "to"]
@@ -410,6 +494,123 @@ async function executeGetNegativeKeywordCandidates(params: { from: string; to: s
   return candidates;
 }
 
+// Helper function to normalize placement names
+function normalizePlacementName(rawPlacement: string | null): string {
+  if (!rawPlacement) return "Unknown";
+  const placementMap: Record<string, string> = {
+    "Top of Search on-Amazon": "Top of search (first page)",
+    "Detail Page on-Amazon": "Product pages",
+    "Other on-Amazon": "Rest of search",
+    "Off Amazon": "Off Amazon",
+  };
+  return placementMap[rawPlacement] || rawPlacement;
+}
+
+async function executeGetProductPlacements(params: { from: string; to: string; country?: string; campaignId?: number }) {
+  const { from, to, country, campaignId } = params;
+  
+  const conditions = [];
+  conditions.push(gte(productPlacement.date, from));
+  conditions.push(lte(productPlacement.date, to));
+  if (country) conditions.push(eq(productPlacement.country, country));
+  if (campaignId) conditions.push(eq(productPlacement.campaignId, campaignId));
+  
+  const results = await db
+    .select({
+      placementClassification: productPlacement.placementClassification,
+      clicks: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.clicks}, '')::numeric), 0)`,
+      cost: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.cost}, '')::numeric), 0)`,
+      sales: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.sales30d}, '')::numeric), 0)`,
+      orders: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.purchases30d}, '')::numeric), 0)`,
+      impressions: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.impressions}, '')::numeric), 0)`,
+    })
+    .from(productPlacement)
+    .where(and(...conditions))
+    .groupBy(productPlacement.placementClassification);
+  
+  return results.map(row => ({
+    placement: normalizePlacementName(row.placementClassification),
+    clicks: Number(row.clicks),
+    cost: Number(row.cost),
+    sales: Number(row.sales),
+    orders: Number(row.orders),
+    impressions: Number(row.impressions),
+    acos: calculateACOS(Number(row.cost), Number(row.sales)),
+    cpc: calculateCPC(Number(row.cost), Number(row.clicks)),
+  })).sort((a, b) => b.sales - a.sales);
+}
+
+async function executeGetBrandPlacements(params: { from: string; to: string; country?: string; campaignId?: number }) {
+  const { from, to, country, campaignId } = params;
+  
+  const conditions = [];
+  conditions.push(gte(brandPlacement.date, from));
+  conditions.push(lte(brandPlacement.date, to));
+  if (country) conditions.push(eq(brandPlacement.country, country));
+  if (campaignId) conditions.push(eq(brandPlacement.campaignId, campaignId));
+  
+  const results = await db
+    .select({
+      costType: brandPlacement.costType,
+      clicks: sql<number>`COALESCE(SUM(${brandPlacement.clicks}), 0)`,
+      cost: sql<number>`COALESCE(SUM(${brandPlacement.cost}), 0)`,
+      sales: sql<number>`COALESCE(SUM(${brandPlacement.sales}), 0)`,
+      orders: sql<number>`COALESCE(SUM(${brandPlacement.purchases}), 0)`,
+      impressions: sql<number>`COALESCE(SUM(${brandPlacement.impressions}), 0)`,
+    })
+    .from(brandPlacement)
+    .where(and(...conditions))
+    .groupBy(brandPlacement.costType);
+  
+  return results.map(row => ({
+    costType: row.costType || "Unknown",
+    clicks: Number(row.clicks),
+    cost: Number(row.cost),
+    sales: Number(row.sales),
+    orders: Number(row.orders),
+    impressions: Number(row.impressions),
+    acos: calculateACOS(Number(row.cost), Number(row.sales)),
+    cpc: calculateCPC(Number(row.cost), Number(row.clicks)),
+  })).sort((a, b) => b.sales - a.sales);
+}
+
+async function executeGetDisplayTargeting(params: { from: string; to: string; country?: string; campaignId?: number; limit?: number }) {
+  const { from, to, country, campaignId, limit = 20 } = params;
+  
+  const conditions = [];
+  conditions.push(gte(displayTargeting.date, from));
+  conditions.push(lte(displayTargeting.date, to));
+  if (country) conditions.push(eq(displayTargeting.country, country));
+  if (campaignId) conditions.push(eq(displayTargeting.campaignId, campaignId));
+  
+  const results = await db
+    .select({
+      targetingText: displayTargeting.targetingText,
+      targetingExpression: displayTargeting.targetingExpression,
+      clicks: sql<number>`COALESCE(SUM(${displayTargeting.clicks}), 0)`,
+      cost: sql<number>`COALESCE(SUM(${displayTargeting.cost}), 0)`,
+      sales: sql<number>`COALESCE(SUM(${displayTargeting.sales}), 0)`,
+      purchases: sql<number>`COALESCE(SUM(${displayTargeting.purchases}), 0)`,
+      impressions: sql<number>`COALESCE(SUM(${displayTargeting.impressions}), 0)`,
+    })
+    .from(displayTargeting)
+    .where(and(...conditions))
+    .groupBy(displayTargeting.targetingText, displayTargeting.targetingExpression)
+    .limit(limit * 2);
+  
+  return results.map(row => ({
+    targetingText: row.targetingText,
+    targetingExpression: row.targetingExpression,
+    clicks: Number(row.clicks),
+    cost: Number(row.cost),
+    sales: Number(row.sales),
+    orders: Number(row.purchases),
+    impressions: Number(row.impressions),
+    acos: calculateACOS(Number(row.cost), Number(row.sales)),
+    cpc: calculateCPC(Number(row.cost), Number(row.clicks)),
+  })).sort((a, b) => b.cost - a.cost).slice(0, limit);
+}
+
 // Execute tool based on name
 async function executeTool(name: string, input: any): Promise<string> {
   try {
@@ -430,6 +631,15 @@ async function executeTool(name: string, input: any): Promise<string> {
         break;
       case 'get_negative_keyword_candidates':
         result = await executeGetNegativeKeywordCandidates(input);
+        break;
+      case 'get_product_placements':
+        result = await executeGetProductPlacements(input);
+        break;
+      case 'get_brand_placements':
+        result = await executeGetBrandPlacements(input);
+        break;
+      case 'get_display_targeting':
+        result = await executeGetDisplayTargeting(input);
         break;
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
