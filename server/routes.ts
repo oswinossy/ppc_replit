@@ -4,7 +4,7 @@ import { db } from "./db";
 import { brandSearchTerms, brandPlacement, productSearchTerms, productPlacement, displayMatchedTarget, displayTargeting, recommendations } from "@shared/schema";
 import { sql, eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR, calculateROAS, getConfidenceLevel } from "./utils/calculations";
-import { generateBidRecommendation, detectNegativeKeywords } from "./utils/recommendations";
+import { generateBidRecommendation, detectNegativeKeywords, generateBulkRecommendations, formatRecommendationsForCSV } from "./utils/recommendations";
 import { getExchangeRatesForDate, getExchangeRatesForRange, convertToEur } from "./utils/exchangeRates";
 import { normalizePlacementName, getCurrencyForCountry } from "@shared/currency";
 import * as XLSX from 'xlsx';
@@ -594,37 +594,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .map(row => {
           const acos = calculateACOS(row.cost, row.sales);
           const cpc = calculateCPC(row.cost, row.clicks);
+          const cvr = Number(row.clicks) > 0 ? (Number(row.orders) / Number(row.clicks)) * 100 : 0;
           const targetAcos = 20;
+          const lowerBound = targetAcos * 0.8; // 16%
+          const upperBound = targetAcos * 1.1; // 22%
+          const maxChangePercent = 25; // Cap at ±25% per adjustment
           
-          // Only calculate recommendation for terms with 30+ clicks (minimum threshold)
           const baseBid = row.keywordBid || cpc || 1.0;
           let recommendedBid: number | null = null;
           let bidChange: number | null = null;
-          let confidence = getConfidenceLevel(row.clicks).label;
+          let rationale: string | null = null;
+          let action: string | null = null;
+          const confidenceData = getConfidenceLevel(row.clicks);
           
           // Apply PPC AI logic only for terms with 30+ clicks
           if (row.clicks >= 30) {
-            recommendedBid = baseBid;
-            
             if (row.sales === 0) {
-              // No sales with 30+ clicks - reduce bid
-              const reduction = row.clicks >= 100 ? 0.70 : 0.85; // -30% or -15%
-              recommendedBid = baseBid * reduction;
-            } else if (acos > 0 && acos <= targetAcos * 0.8) {
-              // ACOS well below target - increase bid
-              const increase = row.clicks >= 300 ? 1.20 : row.clicks >= 100 ? 1.15 : 1.10;
-              recommendedBid = baseBid * increase;
-            } else if (acos > 0) {
-              // Standard formula: current bid × (target ACOS / current ACOS)
-              recommendedBid = baseBid * (targetAcos / acos);
+              // No sales - reduce bid incrementally (capped at -25%)
+              const decreasePercent = Math.min(maxChangePercent, 15 + Math.floor(row.clicks / 50) * 5);
+              recommendedBid = baseBid * (1 - decreasePercent / 100);
+              action = 'decrease';
+              rationale = `No sales after ${row.clicks} clicks (CVR: 0%). Reducing bid by ${decreasePercent}%.`;
+            } else if (acos < lowerBound) {
+              // ACOS below target range - increase bid (formula-based, capped at +25%)
+              const formulaBid = baseBid * (targetAcos / acos);
+              const maxIncrease = baseBid * (1 + maxChangePercent / 100);
+              recommendedBid = Math.min(formulaBid, maxIncrease);
+              action = 'increase';
+              rationale = `ACOS ${acos.toFixed(1)}% is below target range (${lowerBound.toFixed(0)}%-${upperBound.toFixed(0)}%). CVR: ${cvr.toFixed(2)}%.`;
+            } else if (acos > upperBound) {
+              // ACOS above target range - decrease bid (formula-based, capped at -25%)
+              const formulaBid = baseBid * (targetAcos / acos);
+              const maxDecrease = baseBid * (1 - maxChangePercent / 100);
+              recommendedBid = Math.max(formulaBid, maxDecrease);
+              action = 'decrease';
+              rationale = `ACOS ${acos.toFixed(1)}% exceeds target range (${lowerBound.toFixed(0)}%-${upperBound.toFixed(0)}%). CVR: ${cvr.toFixed(2)}%.`;
+            } else {
+              // ACOS within target range (16%-22%) - no change needed
+              recommendedBid = null;
+              action = 'maintain';
+              rationale = `ACOS ${acos.toFixed(1)}% is within target range. No adjustment needed.`;
             }
             
-            // Apply safeguards: 20% to 150% of base bid
-            const minBid = baseBid * 0.20;
-            const maxBid = baseBid * 1.50;
-            recommendedBid = Math.max(minBid, Math.min(maxBid, recommendedBid));
-            recommendedBid = Math.round(recommendedBid * 100) / 100;
-            bidChange = baseBid > 0 ? ((recommendedBid - baseBid) / baseBid) * 100 : 0;
+            if (recommendedBid !== null) {
+              // Apply safeguards: minimum 0.02, max 200% of base bid
+              const minBid = 0.02;
+              const maxBid = baseBid * 2;
+              recommendedBid = Math.max(minBid, Math.min(maxBid, recommendedBid));
+              recommendedBid = Math.round(recommendedBid * 100) / 100;
+              bidChange = baseBid > 0 ? ((recommendedBid - baseBid) / baseBid) * 100 : 0;
+            }
           }
 
           return {
@@ -637,11 +656,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             orders: Number(row.orders),
             acos,
             cpc,
-            cvr: Number(row.clicks) > 0 ? (Number(row.orders) / Number(row.clicks)) * 100 : 0,
+            cvr,
             currentBid: Number(row.keywordBid || 0),
-            recommendedBid: recommendedBid, // null if <30 clicks
-            bidChange: bidChange, // null if <30 clicks
-            confidence: confidence,
+            recommendedBid: recommendedBid,
+            bidChange: bidChange,
+            action: action,
+            rationale: rationale,
+            confidence: confidenceData.label,
+            confidenceLevel: confidenceData.level,
             currency: row.currency,
           };
         })
@@ -1289,8 +1311,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
           adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          impressions: sql<number>`0`,
           cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
         })
         .from(productSearchTerms)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -1300,8 +1324,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         results.map(row => ({
           searchTerm: row.searchTerm || '',
           clicks: Number(row.clicks),
+          impressions: Number(row.impressions),
           cost: Number(row.cost),
           sales: Number(row.sales),
+          orders: Number(row.orders),
           currentBid: null,
           cpc: Number(row.clicks) > 0 ? Number(row.cost) / Number(row.clicks) : 0,
         }))
@@ -1329,8 +1355,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
           adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          impressions: sql<number>`0`,
           cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
           sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
         })
         .from(productSearchTerms)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -1340,8 +1368,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         results.map(row => ({
           searchTerm: row.searchTerm || '',
           clicks: Number(row.clicks),
+          impressions: Number(row.impressions),
           cost: Number(row.cost),
           sales: Number(row.sales),
+          orders: Number(row.orders),
           currentBid: null,
           cpc: Number(row.clicks) > 0 ? Number(row.cost) / Number(row.clicks) : 0,
         }))
@@ -1359,6 +1389,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Export error:', error);
       res.status(500).json({ error: 'Failed to export negatives' });
+    }
+  });
+
+  // Export bid recommendations as CSV
+  app.get("/api/exports/recommendations.csv", async (req, res) => {
+    try {
+      const { adGroupId, campaignId, from, to } = req.query;
+      
+      const conditions = [];
+      if (adGroupId) conditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
+      if (campaignId) conditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
+      if (from) conditions.push(gte(productSearchTerms.date, from as string));
+      if (to) conditions.push(lte(productSearchTerms.date, to as string));
+
+      const results = await db
+        .select({
+          searchTerm: productSearchTerms.searchTerm,
+          matchType: productSearchTerms.matchType,
+          keywordBid: sql<number>`MAX(${productSearchTerms.keywordBid})`,
+          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+          impressions: sql<number>`0`,
+          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
+        })
+        .from(productSearchTerms)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .groupBy(productSearchTerms.searchTerm, productSearchTerms.matchType);
+
+      const termsData = results.map(row => ({
+        searchTerm: row.searchTerm || '',
+        clicks: Number(row.clicks),
+        impressions: Number(row.impressions),
+        cost: Number(row.cost),
+        sales: Number(row.sales),
+        orders: Number(row.orders),
+        currentBid: Number(row.keywordBid || 0) || null,
+        cpc: Number(row.clicks) > 0 ? Number(row.cost) / Number(row.clicks) : 0,
+        matchType: row.matchType || undefined,
+      }));
+
+      const recommendations = generateBulkRecommendations(termsData, 20);
+      const csvContent = formatRecommendationsForCSV(recommendations);
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=bid-recommendations.csv');
+      res.send(csvContent);
+    } catch (error) {
+      console.error('Export recommendations error:', error);
+      res.status(500).json({ error: 'Failed to export recommendations' });
     }
   });
 

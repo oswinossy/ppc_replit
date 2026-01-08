@@ -140,6 +140,16 @@ export default function AdGroupView() {
     window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
   };
 
+  const handleExportRecommendations = async () => {
+    const params = new URLSearchParams({ 
+      adGroupId,
+      campaignType,
+      from: dateRange.from, 
+      to: dateRange.to 
+    });
+    window.open(`/api/exports/recommendations.csv?${params}`, '_blank');
+  };
+
   const kpiCards = (kpis && !kpis.error) ? [
     { label: "Ad Sales", value: kpis.adSales?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0', currency: kpis.currency === 'EUR' ? '€' : kpis.currency },
     { label: "ACOS", value: `${kpis.acos?.toFixed(1) || '0'}%` },
@@ -167,8 +177,18 @@ export default function AdGroupView() {
               variant="outline" 
               size="sm" 
               className="gap-2" 
+              onClick={handleExportRecommendations}
+              data-testid="button-export-recommendations"
+            >
+              <Download className="h-4 w-4" />
+              Export Bids CSV
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-2" 
               onClick={handleExportNegatives}
-              data-testid="button-export"
+              data-testid="button-export-negatives"
             >
               <Download className="h-4 w-4" />
               Export Negatives
@@ -229,11 +249,31 @@ export default function AdGroupView() {
                     { key: "cost", label: "Cost (€)", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
                     { key: "sales", label: "Sales (€)", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
                     { key: "orders", label: "Orders", align: "right", sortable: true },
-                    { key: "cpc", label: "CPC", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
                     { key: "cvr", label: "CVR", align: "right", sortable: true, render: (val) => `${(val ?? 0).toFixed(1)}%` },
                     { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val ?? 0} /> },
                     { key: "currentBid", label: "Current Bid", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
-                    { key: "recommendedBid", label: "Bid Recommendation", align: "right", sortable: true, render: (val) => val != null ? `€${val.toFixed(2)}` : "-" },
+                    { key: "recommendedBid", label: "New Bid", align: "right", sortable: true, render: (val) => val != null ? `€${val.toFixed(2)}` : "-" },
+                    { key: "bidChange", label: "Change", align: "right", sortable: true, render: (val, row) => {
+                      if (val == null || row.action === 'maintain') return <span className="text-muted-foreground">-</span>;
+                      const isIncrease = row.action === 'increase';
+                      const isDecrease = row.action === 'decrease';
+                      return (
+                        <span className={isIncrease ? "text-green-600 dark:text-green-400" : isDecrease ? "text-red-600 dark:text-red-400" : ""}>
+                          {val > 0 ? "+" : ""}{val.toFixed(1)}%
+                        </span>
+                      );
+                    }},
+                    { key: "confidence", label: "Confidence", align: "center", sortable: true, render: (val) => {
+                      if (!val) return "-";
+                      const colors: Record<string, string> = {
+                        'Extreme': 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+                        'High': 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+                        'Good': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+                        'OK': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+                        'Low': 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
+                      };
+                      return <Badge className={colors[val] || ''}>{val}</Badge>;
+                    }},
                   ]}
                   data={searchTerms}
                 />
