@@ -84,7 +84,7 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
 ### AI Analytics Agent
 - **Model**: Anthropic Claude Opus 4.5 (claude-opus-4-20250514) via @anthropic-ai/sdk
 - **Endpoint**: `/api/agent/query` with SSE streaming support
-- **Tools Available (8 total)**:
+- **Tools Available (10 total)**:
     - `get_kpis`: Fetch aggregate KPIs (sales, ACOS, cost, clicks, orders) with date range and campaign type filters
     - `get_campaigns`: List campaigns with performance metrics, sorted by cost
     - `get_countries_performance`: Country-level breakdown with EUR conversion
@@ -93,6 +93,8 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - `get_product_placements`: Sponsored Products placement-level performance (Top of Search, Product Pages, Rest of Search)
     - `get_brand_placements`: Sponsored Brands performance grouped by cost type
     - `get_display_targeting`: Display targeting performance by targeting expression
+    - `get_data_coverage`: Check for missing dates and data gaps across all 6 tables
+    - `get_daily_breakdown`: Daily-level metrics for trend analysis and anomaly detection
 - **Response Time**: ~10-11 seconds for tool-using queries
 - **Frontend**: Floating chat button (AgentChat component) with message history and suggested questions
 - **Read-Only Access**: Agent can query all 6 Supabase tables but cannot modify data

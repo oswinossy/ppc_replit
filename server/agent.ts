@@ -25,6 +25,8 @@ You have access to tools that query real campaign data from the database. The da
 - All monetary values are displayed in EUR (converted using ECB exchange rates)
 - Placement-level performance data (Top of Search, Product Pages, Rest of Search, Off Amazon)
 - Display targeting data with targeting expressions and performance metrics
+- Daily-level metrics for trend analysis and anomaly detection
+- Data coverage information to identify missing dates and gaps in the data
 
 ## Guidelines
 1. Always use the available tools to fetch real data before answering questions
@@ -266,6 +268,64 @@ const tools: Anthropic.Tool[] = [
         limit: {
           type: "number",
           description: "Maximum number of results. Default 20."
+        }
+      },
+      required: ["from", "to"]
+    }
+  },
+  {
+    name: "get_data_coverage",
+    description: "Check data coverage and identify missing dates. Returns record counts per day for each table to find gaps in the data.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        from: {
+          type: "string",
+          description: "Start date in YYYY-MM-DD format"
+        },
+        to: {
+          type: "string",
+          description: "End date in YYYY-MM-DD format"
+        },
+        country: {
+          type: "string",
+          description: "Optional country code to filter"
+        },
+        tables: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional list of tables to check. Options: products_search_terms, products_placement, brands_search_terms, brands_placement, display_matched_target, display_targeting. Defaults to all."
+        }
+      },
+      required: ["from", "to"]
+    }
+  },
+  {
+    name: "get_daily_breakdown",
+    description: "Get daily-level metrics breakdown for trend analysis and anomaly detection. Returns sales, cost, clicks, orders, and ACOS for each day.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        from: {
+          type: "string",
+          description: "Start date in YYYY-MM-DD format"
+        },
+        to: {
+          type: "string",
+          description: "End date in YYYY-MM-DD format"
+        },
+        country: {
+          type: "string",
+          description: "Optional country code"
+        },
+        campaignType: {
+          type: "string",
+          enum: ["products", "brands", "display"],
+          description: "Campaign type filter. Defaults to products."
+        },
+        campaignId: {
+          type: "number",
+          description: "Optional campaign ID to filter by specific campaign"
         }
       },
       required: ["from", "to"]
@@ -611,6 +671,188 @@ async function executeGetDisplayTargeting(params: { from: string; to: string; co
   })).sort((a, b) => b.cost - a.cost).slice(0, limit);
 }
 
+// Get data coverage - check for missing dates across tables
+async function executeGetDataCoverage(params: { from: string; to: string; country?: string; tables?: string[] }) {
+  const { from, to, country, tables } = params;
+  
+  const allTables = [
+    'products_search_terms', 'products_placement',
+    'brands_search_terms', 'brands_placement',
+    'display_matched_target', 'display_targeting'
+  ];
+  const tablesToCheck = tables && tables.length > 0 ? tables : allTables;
+  
+  const results: Record<string, { dates: Record<string, number>; totalRecords: number; datesWithData: number; missingDates: string[] }> = {};
+  
+  // Generate all dates in range
+  const startDate = new Date(from);
+  const endDate = new Date(to);
+  const allDates: string[] = [];
+  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    allDates.push(d.toISOString().split('T')[0]);
+  }
+  
+  for (const tableName of tablesToCheck) {
+    let table: any;
+    let dateField: any;
+    
+    switch (tableName) {
+      case 'products_search_terms':
+        table = productSearchTerms;
+        dateField = productSearchTerms.date;
+        break;
+      case 'products_placement':
+        table = productPlacement;
+        dateField = productPlacement.date;
+        break;
+      case 'brands_search_terms':
+        table = brandSearchTerms;
+        dateField = brandSearchTerms.date;
+        break;
+      case 'brands_placement':
+        table = brandPlacement;
+        dateField = brandPlacement.date;
+        break;
+      case 'display_matched_target':
+        table = displayMatchedTarget;
+        dateField = displayMatchedTarget.date;
+        break;
+      case 'display_targeting':
+        table = displayTargeting;
+        dateField = displayTargeting.date;
+        break;
+      default:
+        continue;
+    }
+    
+    const conditions = [];
+    conditions.push(gte(dateField, from));
+    conditions.push(lte(dateField, to));
+    if (country && table.country) conditions.push(eq(table.country, country));
+    
+    const dateResults = await db
+      .select({
+        date: sql<string>`${dateField}::text`,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(table)
+      .where(and(...conditions))
+      .groupBy(dateField);
+    
+    const dateMap: Record<string, number> = {};
+    let totalRecords = 0;
+    
+    for (const row of dateResults) {
+      const dateStr = row.date?.split('T')[0] || row.date;
+      dateMap[dateStr] = Number(row.count);
+      totalRecords += Number(row.count);
+    }
+    
+    const datesWithData = Object.keys(dateMap).length;
+    const missingDates = allDates.filter(d => !dateMap[d]);
+    
+    results[tableName] = {
+      dates: dateMap,
+      totalRecords,
+      datesWithData,
+      missingDates,
+    };
+  }
+  
+  return {
+    dateRange: { from, to, totalDays: allDates.length },
+    coverage: results,
+    summary: Object.entries(results).map(([table, data]) => ({
+      table,
+      totalRecords: data.totalRecords,
+      daysWithData: data.datesWithData,
+      missingDays: data.missingDates.length,
+      coveragePercent: ((data.datesWithData / allDates.length) * 100).toFixed(1) + '%',
+    })),
+  };
+}
+
+// Get daily breakdown - daily-level metrics for trend analysis
+async function executeGetDailyBreakdown(params: { from: string; to: string; country?: string; campaignType?: string; campaignId?: number }) {
+  const { from, to, country, campaignType = 'products', campaignId } = params;
+  
+  let results: any[] = [];
+  
+  if (campaignType === 'brands') {
+    const conditions = [];
+    conditions.push(gte(brandSearchTerms.date, from));
+    conditions.push(lte(brandSearchTerms.date, to));
+    if (country) conditions.push(eq(brandSearchTerms.country, country));
+    if (campaignId) conditions.push(eq(brandSearchTerms.campaignId, campaignId));
+    
+    results = await db
+      .select({
+        date: brandSearchTerms.date,
+        clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+        cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+        sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+        orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+        impressions: sql<number>`COALESCE(SUM(${brandSearchTerms.impressions}), 0)`,
+      })
+      .from(brandSearchTerms)
+      .where(and(...conditions))
+      .groupBy(brandSearchTerms.date)
+      .orderBy(brandSearchTerms.date);
+  } else if (campaignType === 'display') {
+    const conditions = [];
+    conditions.push(gte(displayMatchedTarget.date, from));
+    conditions.push(lte(displayMatchedTarget.date, to));
+    if (country) conditions.push(eq(displayMatchedTarget.country, country));
+    if (campaignId) conditions.push(eq(displayMatchedTarget.campaignId, campaignId));
+    
+    results = await db
+      .select({
+        date: displayMatchedTarget.date,
+        clicks: sql<number>`COALESCE(SUM(${displayMatchedTarget.clicks}), 0)`,
+        cost: sql<number>`COALESCE(SUM(${displayMatchedTarget.cost}), 0)`,
+        sales: sql<number>`COALESCE(SUM(${displayMatchedTarget.sales}), 0)`,
+        orders: sql<number>`COALESCE(SUM(${displayMatchedTarget.purchases}), 0)`,
+        impressions: sql<number>`COALESCE(SUM(${displayMatchedTarget.impressions}), 0)`,
+      })
+      .from(displayMatchedTarget)
+      .where(and(...conditions))
+      .groupBy(displayMatchedTarget.date)
+      .orderBy(displayMatchedTarget.date);
+  } else {
+    const conditions = [];
+    conditions.push(gte(productSearchTerms.date, from));
+    conditions.push(lte(productSearchTerms.date, to));
+    if (country) conditions.push(eq(productSearchTerms.country, country));
+    if (campaignId) conditions.push(eq(productSearchTerms.campaignId, campaignId));
+    
+    results = await db
+      .select({
+        date: productSearchTerms.date,
+        clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+        cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+        sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+        orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
+        impressions: sql<number>`COALESCE(SUM(${productSearchTerms.impressions}), 0)`,
+      })
+      .from(productSearchTerms)
+      .where(and(...conditions))
+      .groupBy(productSearchTerms.date)
+      .orderBy(productSearchTerms.date);
+  }
+  
+  return results.map(row => ({
+    date: String(row.date),
+    clicks: Number(row.clicks),
+    cost: Number(row.cost),
+    sales: Number(row.sales),
+    orders: Number(row.orders),
+    impressions: Number(row.impressions),
+    acos: calculateACOS(Number(row.cost), Number(row.sales)),
+    cpc: calculateCPC(Number(row.cost), Number(row.clicks)),
+    cvr: calculateCVR(Number(row.orders), Number(row.clicks)),
+  }));
+}
+
 // Execute tool based on name
 async function executeTool(name: string, input: any): Promise<string> {
   try {
@@ -640,6 +882,12 @@ async function executeTool(name: string, input: any): Promise<string> {
         break;
       case 'get_display_targeting':
         result = await executeGetDisplayTargeting(input);
+        break;
+      case 'get_data_coverage':
+        result = await executeGetDataCoverage(input);
+        break;
+      case 'get_daily_breakdown':
+        result = await executeGetDailyBreakdown(input);
         break;
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
