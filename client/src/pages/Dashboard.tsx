@@ -197,6 +197,16 @@ export default function Dashboard() {
               variant="outline" 
               size="sm" 
               className="gap-2" 
+              onClick={() => window.open('/api/exports/vid-campaigns.csv', '_blank')}
+              data-testid="button-export-vid"
+            >
+              <Download className="h-4 w-4" />
+              VID Campaigns
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-2" 
               onClick={handleExportNegatives}
               data-testid="button-export"
             >

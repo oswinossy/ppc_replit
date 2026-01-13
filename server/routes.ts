@@ -1388,6 +1388,123 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Export VID campaigns as CSV (campaigns with "VID" in the name)
+  app.get("/api/exports/vid-campaigns.csv", async (req, res) => {
+    try {
+      const results: Array<{
+        source_table: string;
+        campaign_id: string;
+        campaign_name: string;
+        country: string;
+        campaign_status: string;
+      }> = [];
+
+      // Query Brand Search Terms
+      const brandSearchTermsData = await db.execute(sql`
+        SELECT DISTINCT 
+          'brand_search_terms' as source_table,
+          campaign_id::text as campaign_id,
+          campaign_name,
+          country,
+          COALESCE(campaign_status, '') as campaign_status
+        FROM s_brand_search_terms
+        WHERE campaign_name ILIKE '%VID%'
+      `);
+      for (const row of brandSearchTermsData as any[]) {
+        results.push(row);
+      }
+
+      // Query Brand Placement
+      const brandPlacementData = await db.execute(sql`
+        SELECT DISTINCT 
+          'brand_placement' as source_table,
+          "campaignId"::text as campaign_id,
+          "campaignName" as campaign_name,
+          '' as country,
+          COALESCE("campaignStatus", '') as campaign_status
+        FROM "s_brand_placment"
+        WHERE "campaignName" ILIKE '%VID%'
+      `);
+      for (const row of brandPlacementData as any[]) {
+        results.push(row);
+      }
+
+      // Query Product Search Terms
+      const productSearchTermsData = await db.execute(sql`
+        SELECT DISTINCT 
+          'product_search_terms' as source_table,
+          "campaignId"::text as campaign_id,
+          "campaignName" as campaign_name,
+          COALESCE(country, '') as country,
+          COALESCE("campaignStatus", '') as campaign_status
+        FROM s_products_search_terms
+        WHERE "campaignName" ILIKE '%VID%'
+      `);
+      for (const row of productSearchTermsData as any[]) {
+        results.push(row);
+      }
+
+      // Query Product Placement
+      const productPlacementData = await db.execute(sql`
+        SELECT DISTINCT 
+          'product_placement' as source_table,
+          "campaignId"::text as campaign_id,
+          "campaignName" as campaign_name,
+          COALESCE(country, '') as country,
+          '' as campaign_status
+        FROM s_products_placement
+        WHERE "campaignName" ILIKE '%VID%'
+      `);
+      for (const row of productPlacementData as any[]) {
+        results.push(row);
+      }
+
+      // Query Display Matched Target
+      const displayMatchedTargetData = await db.execute(sql`
+        SELECT DISTINCT 
+          'display_matched_target' as source_table,
+          "campaignId"::text as campaign_id,
+          "campaignName" as campaign_name,
+          COALESCE(country, '') as country,
+          '' as campaign_status
+        FROM s_display_matched_target
+        WHERE "campaignName" ILIKE '%VID%'
+      `);
+      for (const row of displayMatchedTargetData as any[]) {
+        results.push(row);
+      }
+
+      // Query Display Targeting
+      const displayTargetingData = await db.execute(sql`
+        SELECT DISTINCT 
+          'display_targeting' as source_table,
+          "campaignId"::text as campaign_id,
+          "campaignName" as campaign_name,
+          COALESCE(country, '') as country,
+          '' as campaign_status
+        FROM s_display_targeting
+        WHERE "campaignName" ILIKE '%VID%'
+      `);
+      for (const row of displayTargetingData as any[]) {
+        results.push(row);
+      }
+
+      // Generate CSV
+      const csvHeader = 'source_table,campaign_id,campaign_name,country,campaign_status';
+      const csvRows = results.map(r => 
+        `"${r.source_table}","${r.campaign_id}","${(r.campaign_name || '').replace(/"/g, '""')}","${r.country}","${r.campaign_status}"`
+      );
+      const csvContent = [csvHeader, ...csvRows].join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=vid-campaigns.csv');
+      res.send(csvContent);
+    } catch (error) {
+      console.error('VID campaigns export error:', error);
+      res.status(500).json({ error: 'Failed to export VID campaigns' });
+    }
+  });
+
   // Export bid recommendations as CSV - supports country, campaign, and ad group level exports
   app.get("/api/exports/recommendations.csv", async (req, res) => {
     try {
