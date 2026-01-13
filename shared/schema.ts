@@ -456,6 +456,56 @@ export const insertRecommendationSchema = createInsertSchema(recommendations).om
   createdAt: true,
 });
 
+// Bid Change History table - tracks when keyword bids are adjusted
+// Used to analyze performance since last bid change
+// Supports Sponsored Products and Sponsored Brands only (Display lacks bid data)
+export const bidChangeHistory = pgTable('bid_change_history', {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  
+  // Campaign type: 'products' or 'brands'
+  campaignType: text("campaign_type").notNull(),
+  
+  // Targeting identifier (keyword/ASIN you bid on)
+  targeting: text("targeting").notNull(),
+  
+  // Campaign and Ad Group identifiers
+  campaignId: bigint("campaign_id", { mode: "number" }).notNull(),
+  adGroupId: bigint("ad_group_id", { mode: "number" }),
+  
+  // Names for context/display
+  campaignName: text("campaign_name"),
+  adGroupName: text("ad_group_name"),
+  
+  // Country for currency context
+  country: text("country"),
+  
+  // Bid change details
+  dateAdjusted: pgDate("date_adjusted").notNull(),
+  currentBid: numeric("current_bid").notNull(),
+  previousBid: numeric("previous_bid").notNull(),
+  
+  // Match type for keyword targeting
+  matchType: text("match_type"),
+  
+  // Record metadata
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type InsertBidChangeHistory = {
+  campaignType: string;
+  targeting: string;
+  campaignId: number;
+  adGroupId?: number | null;
+  campaignName?: string | null;
+  adGroupName?: string | null;
+  country?: string | null;
+  dateAdjusted: string;
+  currentBid: string;
+  previousBid: string;
+  matchType?: string | null;
+};
+export type BidChangeHistory = typeof bidChangeHistory.$inferSelect;
+
 export type InsertRecommendation = z.infer<typeof insertRecommendationSchema>;
 export type Recommendation = typeof recommendations.$inferSelect;
 export type BrandSearchTerm = typeof brandSearchTerms.$inferSelect;

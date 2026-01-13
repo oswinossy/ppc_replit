@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { db } from "./db";
-import { brandSearchTerms, brandPlacement, productSearchTerms, productPlacement, displayMatchedTarget, displayTargeting, recommendations } from "@shared/schema";
+import { brandSearchTerms, brandPlacement, productSearchTerms, productPlacement, displayMatchedTarget, displayTargeting, recommendations, bidChangeHistory } from "@shared/schema";
 import { sql, eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR, calculateROAS, getConfidenceLevel } from "./utils/calculations";
 import { generateBidRecommendation, detectNegativeKeywords, generateBulkRecommendations, formatRecommendationsForCSV } from "./utils/recommendations";
@@ -10,6 +10,7 @@ import { normalizePlacementName, getCurrencyForCountry } from "@shared/currency"
 import * as XLSX from 'xlsx';
 import { getCached, setCache, generateCacheKey } from "./cache";
 import { queryAgent, queryAgentStream } from "./agent";
+import { createBidChangeHistoryTable } from "./migrations/bidChangeHistory";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
@@ -1759,6 +1760,200 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Agent query error:', error);
       res.status(500).json({ error: error.message || 'Failed to process query' });
+    }
+  });
+
+  // Migration endpoint - creates bid_change_history table if not exists
+  app.post("/api/migrations/bid-change-history", async (req, res) => {
+    try {
+      await createBidChangeHistoryTable();
+      res.json({ success: true, message: 'bid_change_history table created/verified' });
+    } catch (error: any) {
+      console.error('Migration error:', error);
+      res.status(500).json({ success: false, error: error.message || 'Migration failed' });
+    }
+  });
+
+  // Detect bid changes - compares bids across consecutive dates and records changes
+  // This should be run daily after new data is uploaded
+  app.post("/api/detect-bid-changes", async (req, res) => {
+    try {
+      let totalChangesDetected = 0;
+
+      // Detect changes for Sponsored Products
+      // Uses IS NOT DISTINCT FROM for ad_group_id to handle NULL values correctly
+      const productChanges = await db.execute(sql`
+        WITH bid_changes AS (
+          SELECT 
+            'products' as campaign_type,
+            curr.targeting,
+            curr."campaignId" as campaign_id,
+            curr."adGroupId" as ad_group_id,
+            MAX(curr."campaignName") as campaign_name,
+            MAX(curr."adGroupName") as ad_group_name,
+            curr.country,
+            curr.date::date as date_adjusted,
+            curr."keywordBid" as current_bid,
+            prev."keywordBid" as previous_bid,
+            MAX(curr."matchType") as match_type
+          FROM "s_products_search_terms" curr
+          INNER JOIN "s_products_search_terms" prev 
+            ON curr.targeting = prev.targeting
+            AND curr."campaignId" = prev."campaignId"
+            AND curr."adGroupId" IS NOT DISTINCT FROM prev."adGroupId"
+            AND curr.date::date = prev.date::date + INTERVAL '1 day'
+          WHERE curr."keywordBid" IS NOT NULL 
+            AND prev."keywordBid" IS NOT NULL
+            AND curr."keywordBid" != prev."keywordBid"
+          GROUP BY curr.targeting, curr."campaignId", curr."adGroupId", curr.country, 
+                   curr.date, curr."keywordBid", prev."keywordBid"
+        )
+        INSERT INTO bid_change_history 
+          (campaign_type, targeting, campaign_id, ad_group_id, campaign_name, ad_group_name, 
+           country, date_adjusted, current_bid, previous_bid, match_type)
+        SELECT 
+          campaign_type, targeting, campaign_id, ad_group_id, campaign_name, ad_group_name,
+          country, date_adjusted, current_bid, previous_bid, match_type
+        FROM bid_changes bc
+        WHERE NOT EXISTS (
+          SELECT 1 FROM bid_change_history bch
+          WHERE bch.campaign_type = bc.campaign_type
+            AND bch.targeting = bc.targeting
+            AND bch.campaign_id = bc.campaign_id
+            AND bch.ad_group_id IS NOT DISTINCT FROM bc.ad_group_id
+            AND bch.date_adjusted = bc.date_adjusted
+        )
+        RETURNING id
+      `);
+
+      // Extract row count correctly from postgres-js result
+      const productResult = productChanges as any;
+      const productCount = productResult?.length ?? productResult?.rowCount ?? 0;
+      totalChangesDetected += productCount;
+
+      // Detect changes for Sponsored Brands
+      // Uses IS NOT DISTINCT FROM for ad_group_id to handle NULL values correctly
+      const brandChanges = await db.execute(sql`
+        WITH bid_changes AS (
+          SELECT 
+            'brands' as campaign_type,
+            curr.keyword_text as targeting,
+            curr.campaign_id,
+            curr.ad_group_id,
+            MAX(curr.campaign_name) as campaign_name,
+            MAX(curr.ad_group_name) as ad_group_name,
+            curr.country,
+            curr.date::date as date_adjusted,
+            curr.keyword_bid as current_bid,
+            prev.keyword_bid as previous_bid,
+            MAX(curr.match_type) as match_type
+          FROM "s_brand_search_terms" curr
+          INNER JOIN "s_brand_search_terms" prev 
+            ON curr.keyword_text = prev.keyword_text
+            AND curr.campaign_id = prev.campaign_id
+            AND curr.ad_group_id IS NOT DISTINCT FROM prev.ad_group_id
+            AND curr.date::date = prev.date::date + INTERVAL '1 day'
+          WHERE curr.keyword_bid IS NOT NULL 
+            AND prev.keyword_bid IS NOT NULL
+            AND curr.keyword_bid != prev.keyword_bid
+          GROUP BY curr.keyword_text, curr.campaign_id, curr.ad_group_id, curr.country,
+                   curr.date, curr.keyword_bid, prev.keyword_bid
+        )
+        INSERT INTO bid_change_history 
+          (campaign_type, targeting, campaign_id, ad_group_id, campaign_name, ad_group_name,
+           country, date_adjusted, current_bid, previous_bid, match_type)
+        SELECT 
+          campaign_type, targeting, campaign_id, ad_group_id, campaign_name, ad_group_name,
+          country, date_adjusted, current_bid, previous_bid, match_type
+        FROM bid_changes bc
+        WHERE NOT EXISTS (
+          SELECT 1 FROM bid_change_history bch
+          WHERE bch.campaign_type = bc.campaign_type
+            AND bch.targeting = bc.targeting
+            AND bch.campaign_id = bc.campaign_id
+            AND bch.ad_group_id IS NOT DISTINCT FROM bc.ad_group_id
+            AND bch.date_adjusted = bc.date_adjusted
+        )
+        RETURNING id
+      `);
+
+      // Extract row count correctly from postgres-js result
+      const brandResult = brandChanges as any;
+      const brandCount = brandResult?.length ?? brandResult?.rowCount ?? 0;
+      totalChangesDetected += brandCount;
+
+      res.json({
+        success: true,
+        changesDetected: {
+          products: productCount,
+          brands: brandCount,
+          total: totalChangesDetected
+        },
+        message: `Detected ${totalChangesDetected} bid changes (${productCount} products, ${brandCount} brands)`
+      });
+    } catch (error: any) {
+      console.error('Bid change detection error:', error);
+      res.status(500).json({ success: false, error: error.message || 'Detection failed' });
+    }
+  });
+
+  // Query bid change history
+  app.get("/api/bid-history", async (req, res) => {
+    try {
+      const { targeting, campaignId, adGroupId, campaignType, from, to, limit: limitParam = '100' } = req.query;
+      
+      const conditions = [];
+      if (targeting) conditions.push(sql`${bidChangeHistory.targeting} = ${targeting}`);
+      if (campaignId) conditions.push(sql`${bidChangeHistory.campaignId} = ${Number(campaignId)}`);
+      if (adGroupId) conditions.push(sql`${bidChangeHistory.adGroupId} = ${Number(adGroupId)}`);
+      if (campaignType) conditions.push(eq(bidChangeHistory.campaignType, campaignType as string));
+      if (from) conditions.push(gte(bidChangeHistory.dateAdjusted, from as string));
+      if (to) conditions.push(lte(bidChangeHistory.dateAdjusted, to as string));
+
+      const results = await db
+        .select()
+        .from(bidChangeHistory)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(bidChangeHistory.dateAdjusted))
+        .limit(Number(limitParam));
+
+      res.json(results);
+    } catch (error: any) {
+      console.error('Bid history query error:', error);
+      res.status(500).json({ error: error.message || 'Failed to fetch bid history' });
+    }
+  });
+
+  // Get last bid change for a specific targeting keyword
+  app.get("/api/bid-history/last-change", async (req, res) => {
+    try {
+      const { targeting, campaignId, adGroupId } = req.query;
+      
+      if (!targeting || !campaignId) {
+        return res.status(400).json({ error: 'targeting and campaignId are required' });
+      }
+
+      const conditions = [
+        sql`${bidChangeHistory.targeting} = ${targeting}`,
+        sql`${bidChangeHistory.campaignId} = ${Number(campaignId)}`
+      ];
+      if (adGroupId) conditions.push(sql`${bidChangeHistory.adGroupId} = ${Number(adGroupId)}`);
+
+      const results = await db
+        .select()
+        .from(bidChangeHistory)
+        .where(and(...conditions))
+        .orderBy(desc(bidChangeHistory.dateAdjusted))
+        .limit(1);
+
+      if (results.length === 0) {
+        return res.json({ found: false, message: 'No bid changes recorded for this targeting' });
+      }
+
+      res.json({ found: true, lastChange: results[0] });
+    } catch (error: any) {
+      console.error('Last bid change query error:', error);
+      res.status(500).json({ error: error.message || 'Failed to fetch last bid change' });
     }
   });
 

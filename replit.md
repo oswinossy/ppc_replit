@@ -81,6 +81,26 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - API responses include calculated fields: `cpc`, `cvr`, `acos`.
     - Frontend renders use null guards for numeric values: `(val ?? 0).toFixed(2)`.
 
+### Bid Change History Tracking
+- **Purpose**: Tracks when keyword bids are adjusted to analyze performance since the last bid change
+- **Supported Campaign Types**: Sponsored Products and Sponsored Brands (Display campaigns lack bid data)
+- **Table**: `bid_change_history` with columns:
+    - `campaign_type`: 'products' or 'brands'
+    - `targeting`: The keyword/ASIN being bid on
+    - `campaign_id`, `ad_group_id`: Identifiers for the campaign/ad group
+    - `campaign_name`, `ad_group_name`: Display names for context
+    - `country`: Country code for currency context
+    - `date_adjusted`: Date when the bid change was detected
+    - `current_bid`: New bid amount after change
+    - `previous_bid`: Bid amount before change
+    - `match_type`: Keyword match type (exact, phrase, broad)
+- **Detection Logic**: Compares `keywordBid` values across consecutive dates; records changes when bids differ
+- **API Endpoints**:
+    - `POST /api/migrations/bid-change-history`: One-time table creation
+    - `POST /api/detect-bid-changes`: Run daily to detect bid changes from new data
+    - `GET /api/bid-history`: Query bid change history with filters (targeting, campaignId, dateRange)
+    - `GET /api/bid-history/last-change`: Get the most recent bid change for a specific targeting keyword
+
 ### AI Analytics Agent
 - **Model**: Anthropic Claude Opus 4.5 (claude-opus-4-20250514) via @anthropic-ai/sdk
 - **Endpoint**: `/api/agent/query` with SSE streaming support
