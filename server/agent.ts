@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "./db";
-import { brandSearchTerms, productSearchTerms, displayMatchedTarget, brandPlacement, productPlacement, displayTargeting } from "@shared/schema";
+import { brandSearchTerms, productSearchTerms, displayMatchedTarget, brandPlacement, productPlacement, displayTargeting, bidChangeHistory } from "@shared/schema";
 import { sql, eq, gte, lte, and } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR } from "./utils/calculations";
 
@@ -17,19 +17,34 @@ const SYSTEM_PROMPT = `You are an expert Amazon PPC (Pay-Per-Click) advertising 
 - Negative keyword identification
 - Campaign performance analysis
 
-## Data Context
-You have access to tools that query real campaign data from the database. The data includes:
-- Campaign performance across multiple countries (DE, US, UK, FR, ES, IT, SE, PL, JP)
-- Metrics: clicks, cost, sales, orders, ACOS, CPC, CVR
-- Campaign types: Sponsored Products (30-day attribution), Sponsored Brands, Display
-- All monetary values are displayed in EUR (converted using ECB exchange rates)
-- Placement-level performance data (Top of Search, Product Pages, Rest of Search, Off Amazon)
-- Display targeting data with targeting expressions and performance metrics
-- Daily-level metrics for trend analysis and anomaly detection
-- Data coverage information to identify missing dates and gaps in the data
+## Database Access
+You have FULL READ ACCESS to all campaign data tables. Use the query_database tool to query any column with any filter.
+
+### Available Tables:
+
+**s_products_search_terms** - Sponsored Products search term data
+Key columns: date, searchTerm, targeting (keyword you bid on), keywordBid, matchType (EXACT/BROAD/PHRASE/TARGETING_EXPRESSION), campaignName, campaignId, adGroupName, adGroupId, clicks, cost, impressions, sales30d, purchases30d, country, campaignStatus, keywordId
+
+**s_products_placement** - Sponsored Products placement data  
+Key columns: date, campaignName, campaignId, placementClassification (Top of Search/Product Pages/etc), clicks, cost, sales30d, purchases30d, country
+
+**s_brand_search_terms** - Sponsored Brands search term data
+Key columns: date, searchTerm, keywordText (keyword you bid on), keywordBid, matchType, campaignName, campaignId, adGroupName, adGroupId, clicks, cost, sales, purchases, country
+
+**s_brand_placment** - Sponsored Brands placement data (note: typo in table name)
+Key columns: date, campaignName, campaignId, costType, clicks, cost, sales, purchases, impressions, country
+
+**s_display_matched_target** - Display matched target data
+Key columns: date, targetingText, campaignName, campaignId, clicks, cost, sales, purchases, impressions, country
+
+**s_display_targeting** - Display targeting data
+Key columns: date, targetingText, targetingExpression, campaignName, campaignId, clicks, cost, sales, purchases, impressions, country
+
+**bid_change_history** - Bid change tracking
+Key columns: id, campaignType (products/brands), targeting, campaignId, adGroupId, campaignName, adGroupName, country, dateAdjusted, currentBid, previousBid, matchType
 
 ## Guidelines
-1. Always use the available tools to fetch real data before answering questions
+1. Use query_database for detailed/custom queries. Use other tools for common aggregations.
 2. Provide specific, actionable insights based on the data
 3. When discussing bid recommendations, explain the reasoning (ACOS-based formula)
 4. Format numbers clearly: percentages with 1 decimal, currency with 2 decimals
@@ -329,6 +344,47 @@ const tools: Anthropic.Tool[] = [
         }
       },
       required: ["from", "to"]
+    }
+  },
+  {
+    name: "query_database",
+    description: "Execute a flexible read-only SQL query on any of the 7 available tables. Use this for custom queries, specific column access, or complex filters not covered by other tools. Returns up to 100 rows by default.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        table: {
+          type: "string",
+          enum: ["s_products_search_terms", "s_products_placement", "s_brand_search_terms", "s_brand_placment", "s_display_matched_target", "s_display_targeting", "bid_change_history"],
+          description: "The table to query"
+        },
+        columns: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of column names to select. Use '*' or omit for all columns."
+        },
+        where: {
+          type: "object",
+          description: "Filter conditions as key-value pairs. Keys are column names, values are the filter values. For date ranges use 'date_from' and 'date_to'."
+        },
+        groupBy: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional columns to group by for aggregations"
+        },
+        aggregations: {
+          type: "object",
+          description: "Optional aggregations as {column: function} pairs. Functions: SUM, COUNT, AVG, MAX, MIN. Example: {clicks: 'SUM', cost: 'SUM'}"
+        },
+        orderBy: {
+          type: "string",
+          description: "Column to order by, optionally with 'DESC'. Example: 'cost DESC'"
+        },
+        limit: {
+          type: "number",
+          description: "Maximum rows to return. Default 100, max 1000."
+        }
+      },
+      required: ["table"]
     }
   }
 ];
@@ -870,6 +926,97 @@ async function executeGetDailyBreakdown(params: { from: string; to: string; coun
   }));
 }
 
+// Flexible database query executor
+async function executeQueryDatabase(params: {
+  table: string;
+  columns?: string[];
+  where?: Record<string, any>;
+  groupBy?: string[];
+  aggregations?: Record<string, string>;
+  orderBy?: string;
+  limit?: number;
+}) {
+  const { table, columns, where, groupBy, aggregations, orderBy, limit = 100 } = params;
+  
+  // Validate table name
+  const allowedTables = [
+    's_products_search_terms', 's_products_placement', 
+    's_brand_search_terms', 's_brand_placment',
+    's_display_matched_target', 's_display_targeting',
+    'bid_change_history'
+  ];
+  
+  if (!allowedTables.includes(table)) {
+    throw new Error(`Table '${table}' is not allowed. Use one of: ${allowedTables.join(', ')}`);
+  }
+  
+  const safeLimit = Math.min(Math.max(1, limit), 1000);
+  
+  // Build SELECT clause
+  let selectClause = '*';
+  if (aggregations && Object.keys(aggregations).length > 0) {
+    const aggParts: string[] = [];
+    if (groupBy && groupBy.length > 0) {
+      aggParts.push(...groupBy.map(col => `"${col}"`));
+    }
+    for (const [col, func] of Object.entries(aggregations)) {
+      const safeFunc = func.toUpperCase();
+      if (!['SUM', 'COUNT', 'AVG', 'MAX', 'MIN'].includes(safeFunc)) {
+        throw new Error(`Invalid aggregation function: ${func}`);
+      }
+      aggParts.push(`${safeFunc}("${col}") as "${col}_${safeFunc.toLowerCase()}"`);
+    }
+    selectClause = aggParts.join(', ');
+  } else if (columns && columns.length > 0 && columns[0] !== '*') {
+    selectClause = columns.map(col => `"${col}"`).join(', ');
+  }
+  
+  // Build WHERE clause
+  const whereParts: string[] = [];
+  if (where) {
+    for (const [key, value] of Object.entries(where)) {
+      if (key === 'date_from') {
+        whereParts.push(`date >= '${value}'`);
+      } else if (key === 'date_to') {
+        whereParts.push(`date <= '${value}'`);
+      } else if (typeof value === 'string') {
+        whereParts.push(`"${key}" = '${value.replace(/'/g, "''")}'`);
+      } else if (typeof value === 'number') {
+        whereParts.push(`"${key}" = ${value}`);
+      } else if (value === null) {
+        whereParts.push(`"${key}" IS NULL`);
+      }
+    }
+  }
+  
+  // Build GROUP BY clause
+  let groupByClause = '';
+  if (groupBy && groupBy.length > 0) {
+    groupByClause = `GROUP BY ${groupBy.map(col => `"${col}"`).join(', ')}`;
+  }
+  
+  // Build ORDER BY clause
+  let orderByClause = '';
+  if (orderBy) {
+    const orderParts = orderBy.split(' ');
+    const col = orderParts[0];
+    const dir = orderParts[1]?.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+    orderByClause = `ORDER BY "${col}" ${dir}`;
+  }
+  
+  // Construct and execute query
+  const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+  const query = `SELECT ${selectClause} FROM "${table}" ${whereClause} ${groupByClause} ${orderByClause} LIMIT ${safeLimit}`;
+  
+  const result = await db.execute(sql.raw(query));
+  
+  return {
+    query: query,
+    rowCount: Array.isArray(result) ? result.length : 0,
+    rows: result
+  };
+}
+
 // Execute tool based on name
 async function executeTool(name: string, input: any): Promise<string> {
   try {
@@ -905,6 +1052,9 @@ async function executeTool(name: string, input: any): Promise<string> {
         break;
       case 'get_daily_breakdown':
         result = await executeGetDailyBreakdown(input);
+        break;
+      case 'query_database':
+        result = await executeQueryDatabase(input);
         break;
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });

@@ -143,7 +143,7 @@ export function AgentChat() {
   }
 
   return (
-    <Card className="fixed top-24 right-6 w-96 h-[600px] shadow-2xl z-50 flex flex-col">
+    <Card className="fixed top-24 right-6 w-96 max-h-[calc(100vh-120px)] h-[500px] shadow-2xl z-50 flex flex-col">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 gap-2 pb-3 border-b">
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5 text-primary" />
