@@ -95,6 +95,7 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - `previous_bid`: Bid amount before change
     - `match_type`: Keyword match type (exact, phrase, broad)
 - **Detection Logic**: Compares `keywordBid` values across consecutive dates; records changes when bids differ
+- **Automatic Scheduling**: Runs daily at 2:00 AM UTC via node-cron scheduler (initialized on server startup)
 - **API Endpoints**:
     - `POST /api/migrations/bid-change-history`: One-time table creation
     - `POST /api/detect-bid-changes`: Run daily to detect bid changes from new data
