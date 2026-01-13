@@ -926,7 +926,58 @@ async function executeGetDailyBreakdown(params: { from: string; to: string; coun
   }));
 }
 
-// Flexible database query executor
+// Table schema configuration for security (whitelist approach)
+interface TableSchema {
+  columns: string[];
+  dateColumn: string | null; // null if table has no date column
+}
+
+const TABLE_SCHEMAS: Record<string, TableSchema> = {
+  's_products_search_terms': {
+    columns: ['date', 'searchTerm', 'targeting', 'keywordBid', 'matchType', 'campaignName', 'campaignId', 'adGroupName', 'adGroupId', 'clicks', 'cost', 'impressions', 'sales30d', 'purchases30d', 'country', 'campaignStatus', 'keywordId', 'currency'],
+    dateColumn: 'date'
+  },
+  's_products_placement': {
+    columns: ['date', 'campaignName', 'campaignId', 'placementClassification', 'clicks', 'cost', 'sales30d', 'purchases30d', 'country', 'impressions'],
+    dateColumn: 'date'
+  },
+  's_brand_search_terms': {
+    columns: ['date', 'searchTerm', 'keywordText', 'keywordBid', 'matchType', 'campaignName', 'campaignId', 'adGroupName', 'adGroupId', 'clicks', 'cost', 'sales', 'purchases', 'impressions', 'country', 'currency'],
+    dateColumn: 'date'
+  },
+  's_brand_placment': {
+    columns: ['date', 'campaignName', 'campaignId', 'costType', 'clicks', 'cost', 'sales', 'purchases', 'impressions', 'country', 'currency'],
+    dateColumn: 'date'
+  },
+  's_display_matched_target': {
+    columns: ['date', 'targetingText', 'matchedTargetAsin', 'campaignName', 'campaignId', 'clicks', 'cost', 'sales', 'purchases', 'impressions', 'country', 'currency'],
+    dateColumn: 'date'
+  },
+  's_display_targeting': {
+    columns: ['date', 'targetingText', 'targetingExpression', 'campaignName', 'campaignId', 'clicks', 'cost', 'sales', 'purchases', 'impressions', 'country', 'currency'],
+    dateColumn: 'date'
+  },
+  'bid_change_history': {
+    columns: ['id', 'campaignType', 'targeting', 'campaignId', 'adGroupId', 'campaignName', 'adGroupName', 'country', 'dateAdjusted', 'currentBid', 'previousBid', 'matchType'],
+    dateColumn: 'dateAdjusted'
+  }
+};
+
+// Strict date validation (YYYY-MM-DD format only)
+function isValidDateFormat(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+// Sanitize identifier - only allow exact matches from whitelist
+function sanitizeIdentifier(identifier: string, allowedList: string[]): string | null {
+  const clean = identifier.trim();
+  if (allowedList.includes(clean)) {
+    return `"${clean}"`;
+  }
+  return null;
+}
+
+// Flexible database query executor (READ-ONLY, sanitized)
 async function executeQueryDatabase(params: {
   table: string;
   columns?: string[];
@@ -938,73 +989,102 @@ async function executeQueryDatabase(params: {
 }) {
   const { table, columns, where, groupBy, aggregations, orderBy, limit = 100 } = params;
   
-  // Validate table name
-  const allowedTables = [
-    's_products_search_terms', 's_products_placement', 
-    's_brand_search_terms', 's_brand_placment',
-    's_display_matched_target', 's_display_targeting',
-    'bid_change_history'
-  ];
-  
-  if (!allowedTables.includes(table)) {
-    throw new Error(`Table '${table}' is not allowed. Use one of: ${allowedTables.join(', ')}`);
+  // Validate table name (strict whitelist)
+  const schema = TABLE_SCHEMAS[table];
+  if (!schema) {
+    throw new Error(`Table '${table}' is not allowed. Use one of: ${Object.keys(TABLE_SCHEMAS).join(', ')}`);
   }
   
+  const validColumns = schema.columns;
   const safeLimit = Math.min(Math.max(1, limit), 1000);
   
-  // Build SELECT clause
+  // Build SELECT clause with column validation
   let selectClause = '*';
   if (aggregations && Object.keys(aggregations).length > 0) {
     const aggParts: string[] = [];
     if (groupBy && groupBy.length > 0) {
-      aggParts.push(...groupBy.map(col => `"${col}"`));
+      for (const col of groupBy) {
+        const safeCol = sanitizeIdentifier(col, validColumns);
+        if (!safeCol) throw new Error(`Invalid column for GROUP BY: ${col}`);
+        aggParts.push(safeCol);
+      }
     }
     for (const [col, func] of Object.entries(aggregations)) {
+      const safeCol = sanitizeIdentifier(col, validColumns);
+      if (!safeCol) throw new Error(`Invalid column for aggregation: ${col}`);
       const safeFunc = func.toUpperCase();
       if (!['SUM', 'COUNT', 'AVG', 'MAX', 'MIN'].includes(safeFunc)) {
-        throw new Error(`Invalid aggregation function: ${func}`);
+        throw new Error(`Invalid aggregation function: ${func}. Allowed: SUM, COUNT, AVG, MAX, MIN`);
       }
-      aggParts.push(`${safeFunc}("${col}") as "${col}_${safeFunc.toLowerCase()}"`);
+      aggParts.push(`${safeFunc}(${safeCol}) as "${col}_${safeFunc.toLowerCase()}"`);
     }
     selectClause = aggParts.join(', ');
   } else if (columns && columns.length > 0 && columns[0] !== '*') {
-    selectClause = columns.map(col => `"${col}"`).join(', ');
+    const safeCols: string[] = [];
+    for (const col of columns) {
+      const safeCol = sanitizeIdentifier(col, validColumns);
+      if (!safeCol) throw new Error(`Invalid column: ${col}`);
+      safeCols.push(safeCol);
+    }
+    selectClause = safeCols.join(', ');
   }
   
-  // Build WHERE clause
+  // Build WHERE clause with strict value sanitization
   const whereParts: string[] = [];
   if (where) {
     for (const [key, value] of Object.entries(where)) {
-      if (key === 'date_from') {
-        whereParts.push(`date >= '${value}'`);
-      } else if (key === 'date_to') {
-        whereParts.push(`date <= '${value}'`);
-      } else if (typeof value === 'string') {
-        whereParts.push(`"${key}" = '${value.replace(/'/g, "''")}'`);
-      } else if (typeof value === 'number') {
-        whereParts.push(`"${key}" = ${value}`);
-      } else if (value === null) {
-        whereParts.push(`"${key}" IS NULL`);
+      // Handle special date range keys (only for tables with date columns)
+      if (key === 'date_from' || key === 'date_to') {
+        if (!schema.dateColumn) {
+          throw new Error(`Table '${table}' does not support date range filtering. Use the actual date column name.`);
+        }
+        const dateStr = String(value);
+        if (!isValidDateFormat(dateStr)) {
+          throw new Error(`Invalid date format for ${key}: '${dateStr}'. Expected YYYY-MM-DD.`);
+        }
+        const operator = key === 'date_from' ? '>=' : '<=';
+        whereParts.push(`"${schema.dateColumn}" ${operator} '${dateStr}'`);
+      } else {
+        const safeCol = sanitizeIdentifier(key, validColumns);
+        if (!safeCol) throw new Error(`Invalid filter column: ${key}`);
+        
+        if (typeof value === 'string') {
+          // Escape single quotes for SQL strings
+          const safeValue = value.replace(/'/g, "''");
+          whereParts.push(`${safeCol} = '${safeValue}'`);
+        } else if (typeof value === 'number' && Number.isFinite(value)) {
+          whereParts.push(`${safeCol} = ${value}`);
+        } else if (value === null) {
+          whereParts.push(`${safeCol} IS NULL`);
+        }
       }
     }
   }
   
-  // Build GROUP BY clause
+  // Build GROUP BY clause with validation
   let groupByClause = '';
   if (groupBy && groupBy.length > 0) {
-    groupByClause = `GROUP BY ${groupBy.map(col => `"${col}"`).join(', ')}`;
+    const safeGroupCols: string[] = [];
+    for (const col of groupBy) {
+      const safeCol = sanitizeIdentifier(col, validColumns);
+      if (!safeCol) throw new Error(`Invalid GROUP BY column: ${col}`);
+      safeGroupCols.push(safeCol);
+    }
+    groupByClause = `GROUP BY ${safeGroupCols.join(', ')}`;
   }
   
-  // Build ORDER BY clause
+  // Build ORDER BY clause with validation
   let orderByClause = '';
   if (orderBy) {
-    const orderParts = orderBy.split(' ');
+    const orderParts = orderBy.trim().split(/\s+/);
     const col = orderParts[0];
+    const safeCol = sanitizeIdentifier(col, validColumns);
+    if (!safeCol) throw new Error(`Invalid ORDER BY column: ${col}`);
     const dir = orderParts[1]?.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
-    orderByClause = `ORDER BY "${col}" ${dir}`;
+    orderByClause = `ORDER BY ${safeCol} ${dir}`;
   }
   
-  // Construct and execute query
+  // Construct and execute query (SELECT only - read-only enforced by design)
   const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
   const query = `SELECT ${selectClause} FROM "${table}" ${whereClause} ${groupByClause} ${orderByClause} LIMIT ${safeLimit}`;
   
