@@ -1,0 +1,1068 @@
+{
+  "name": "S Products Search Terms",
+  "nodes": [
+    {
+      "parameters": {
+        "tableId": "s_products_search_terms",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1584,
+        176
+      ],
+      "id": "beda96e4-9fda-4769-b09b-ff6603835ff1",
+      "name": "Create a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "zYjgwJ1kiPWNJ36y",
+          "name": "Supabase account (on Supabase)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        544,
+        176
+      ],
+      "id": "9dfdfb2f-113d-4323-97a0-f51e3cca55f7",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.compression",
+      "typeVersion": 1.1,
+      "position": [
+        768,
+        176
+      ],
+      "id": "40c36f59-0be2-40c3-bcdb-9f540d497a06",
+      "name": "Compression"
+    },
+    {
+      "parameters": {
+        "operation": "fromJson",
+        "binaryPropertyName": "file_0",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        992,
+        176
+      ],
+      "id": "03d904be-1f2b-447d-8bc7-cef481162a71",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        176
+      ],
+      "id": "5be6846d-fdb4-4da6-865b-90aac20742b0",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "url": "=https://advertising-api-eu.amazon.com/reporting/reports/{{ $('HTTP Request DE').item.json.reportId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Amazon-Advertising-API-ClientId",
+              "value": "amzn1.application-oa2-client.1859e9c86f7549748ce2ff2cb771a99d"
+            },
+            {
+              "name": "Amazon-Advertising-API-Scope",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        176
+      ],
+      "id": "47536c5b-ae22-4b67-a05e-7ac372b4cd69",
+      "name": "HTTP Request1",
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "eZzq3dhM4itLzrAZ",
+          "name": "BGBV Amazon Ads API auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://advertising-api-eu.amazon.com/reporting/reports",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/vnd.createasyncreportrequest.v3+json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.createasyncreportrequest.v3+json"
+            },
+            {
+              "name": "Amazon-Advertising-API-ClientId",
+              "value": "amzn1.application-oa2-client.1859e9c86f7549748ce2ff2cb771a99d"
+            },
+            {
+              "name": "Amazon-Advertising-API-Scope",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "={\n  \"name\": \"SP Search Terms Daily ({{ (new Date(Date.now() - 8*24*60*60*1000)).toISOString().slice(0,10) }}EU)\",\n  \"startDate\": \"{{ (new Date(Date.now() - 8*24*60*60*1000)).toISOString().slice(0,10) }}\",\n  \"endDate\": \"{{ (new Date(Date.now() - 8*24*60*60*1000)).toISOString().slice(0,10) }}\",\n  \"configuration\": {\n    \"adProduct\": \"SPONSORED_PRODUCTS\",\n    \"reportTypeId\": \"spSearchTerm\",\n    \"timeUnit\": \"DAILY\",\n    \"groupBy\": [\"searchTerm\"],\n    \"columns\": [\n      \"impressions\",\n      \"clicks\",\n      \"costPerClick\",\n      \"clickThroughRate\",\n      \"cost\",\n      \"spend\",\n      \"purchases1d\",\n      \"purchases7d\",\n      \"purchases14d\",\n      \"purchases30d\",\n      \"purchasesSameSku1d\",\n      \"purchasesSameSku7d\",\n      \"purchasesSameSku14d\",\n      \"purchasesSameSku30d\",\n      \"unitsSoldClicks1d\",\n      \"unitsSoldClicks7d\",\n      \"unitsSoldClicks14d\",\n      \"unitsSoldClicks30d\",\n      \"sales1d\",\n      \"sales7d\",\n      \"sales14d\",\n      \"sales30d\",\n      \"attributedSalesSameSku1d\",\n      \"attributedSalesSameSku7d\",\n      \"attributedSalesSameSku14d\",\n      \"attributedSalesSameSku30d\",\n      \"unitsSoldSameSku1d\",\n      \"unitsSoldSameSku7d\",\n      \"unitsSoldSameSku14d\",\n      \"unitsSoldSameSku30d\",\n      \"addToList\",\n      \"salesOtherSku7d\",\n      \"salesOtherSku14d\",\n      \"unitsSoldOtherSku7d\",\n      \"unitsSoldOtherSku14d\",\n      \"purchaseClickRate14d\",\n      \"acosClicks7d\",\n      \"acosClicks14d\",\n      \"roasClicks7d\",\n      \"roasClicks14d\",\n      \"keywordId\",\n      \"keyword\",\n      \"campaignBudgetCurrencyCode\",\n      \"date\",\n      \"portfolioId\",\n      \"searchTerm\",\n      \"campaignName\",\n      \"campaignId\",\n      \"campaignBudgetType\",\n      \"campaignBudgetAmount\",\n      \"campaignStatus\",\n      \"keywordBid\",\n      \"adGroupName\",\n      \"adGroupId\",\n      \"keywordType\",\n      \"matchType\",\n      \"targeting\"\n    ],\n    \"format\": \"GZIP_JSON\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -352,
+        0
+      ],
+      "id": "9def0938-01f9-4557-a4cd-a8c721673f06",
+      "name": "HTTP Request DE",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "eZzq3dhM4itLzrAZ",
+          "name": "BGBV Amazon Ads API auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const countries = [\n  { code: 'DE', id: '2810922595930270' },\n  { code: 'GB', id: '2490600184706476' },\n  { code: 'ES', id: '1474270049622096' },\n  { code: 'NL', id: '4198735598086995' },\n  { code: 'BE', id: '97377171369615' },\n  { code: 'FR', id: '2257160443303503' },\n  { code: 'PL', id: '2074106727196080' },\n  { code: 'SE', id: '4086650252702269' },\n  { code: 'IE', id: '1189017476003957' },\n  { code: 'IT', id: '1487973095503885' },\n];\n\nreturn countries.map(({ code, id }) => ({ json: { country: code, id } }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        96
+      ],
+      "id": "5caf66b0-f194-4e0b-8fcd-34a0328167e1",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -576,
+        96
+      ],
+      "id": "881b7c0c-95f7-4096-ae3c-ed6d36501b99",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        96,
+        192
+      ],
+      "id": "6fac1f59-e89c-4908-a4ca-12d521923839",
+      "name": "Loop Over Items2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const countries = [\n  { code: 'DE', id: '2810922595930270' },\n  { code: 'GB', id: '2490600184706476' },\n  { code: 'ES', id: '1474270049622096' },\n  { code: 'NL', id: '4198735598086995' },\n  { code: 'BE', id: '97377171369615' },\n  { code: 'FR', id: '2257160443303503' },\n  { code: 'PL', id: '2074106727196080' },\n  { code: 'SE', id: '4086650252702269' },\n  { code: 'IE', id: '1189017476003957' },\n  { code: 'IT', id: '1487973095503885' },\n];\n\nreturn countries.map(({ code, id }) => ({ json: { country: code, id } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        192
+      ],
+      "id": "43e40a7d-058d-4510-9bb7-ed54654b4d53",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "s_products_search_terms",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "country",
+              "fieldValue": "={{ $('Loop Over Items2').item.json.country }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        176
+      ],
+      "id": "ff2d26ee-b37a-4a91-b6ad-db0dc689d1ad",
+      "name": "Update a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "zYjgwJ1kiPWNJ36y",
+          "name": "Supabase account (on Supabase)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 45,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -352,
+        192
+      ],
+      "id": "ac63fd4e-40b9-472b-b73a-6d096f12935d",
+      "name": "Wait",
+      "webhookId": "10d97e8e-eb87-4aa1-9a5e-315cb0fa077e"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 2
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -992,
+        96
+      ],
+      "id": "720c48b7-1a57-4bee-a774-c9cd5feccdb2",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const countries = [\n{ code: 'DE', id: '2810922595930270', reportId: '31a5e068-2baa-4006-8080-82bcdc437644' },\n{ code: 'GB', id: '2490600184706476', reportId: 'f9766b3e-f7f4-453d-b46c-0097b372d9c8' },\n{ code: 'ES', id: '1474270049622096', reportId: 'f2de2f99-f976-4c16-9c78-66c762344221' },\n{ code: 'NL', id: '4198735598086995', reportId: '22f480b9-3dfc-47ee-9c0c-201c4bf49351' },\n{ code: 'BE', id: '97377171369615', reportId: '7afaeee4-3803-4a8a-bd4c-7a4fd26c6da7' },\n{ code: 'FR', id: '2257160443303503', reportId: '1c9c7b2b-4f45-4553-a0ca-0b44329e5abf' },\n{ code: 'PL', id: '2074106727196080', reportId: '63390a7b-0b81-4c61-9701-7804be5b3eec' },\n{ code: 'SE', id: '4086650252702269', reportId: '6b4d0255-19c6-422b-9cc4-6cfe52bc97d1' },\n{ code: 'IE', id: '1189017476003957', reportId: 'c5bcf0dc-caf7-4388-8ece-f7cdf01c83bf' },\n{ code: 'IT', id: '1487973095503885', reportId: '7e5ed280-3321-4e74-9afc-cc90070ca58a' },\n];\n\nreturn countries.map(({ code, id, reportId }) => ({ json: { country: code, id, reportId } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        1280
+      ],
+      "id": "96b51264-ade3-4a8c-8cf2-87be182fcdd7",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "url": "=https://advertising-api-eu.amazon.com/reporting/reports/{{ $('Code in JavaScript2').item.json.reportId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Amazon-Advertising-API-ClientId",
+              "value": "amzn1.application-oa2-client.1859e9c86f7549748ce2ff2cb771a99d"
+            },
+            {
+              "name": "Amazon-Advertising-API-Scope",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        272,
+        1312
+      ],
+      "id": "78ec3585-2684-45b3-9238-e9e1884f07f6",
+      "name": "HTTP Request",
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "eZzq3dhM4itLzrAZ",
+          "name": "BGBV Amazon Ads API auth"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        880
+      ],
+      "id": "aa660a53-7e08-4278-9151-6882abdb8e39",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "tableId": "s_products_search_terms",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        960
+      ],
+      "id": "4da5d688-5f8b-4a18-8ec8-40b46afd295e",
+      "name": "Create a row1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "zYjgwJ1kiPWNJ36y",
+          "name": "Supabase account (on Supabase)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        496,
+        960
+      ],
+      "id": "5e60e665-44f4-4076-9893-73df1bcf7b48",
+      "name": "HTTP Request3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.compression",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        960
+      ],
+      "id": "06af8954-2f04-4e97-9cc3-8e0567d6614f",
+      "name": "Compression1"
+    },
+    {
+      "parameters": {
+        "operation": "fromJson",
+        "binaryPropertyName": "file_0",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        944,
+        960
+      ],
+      "id": "57342985-02a3-4e19-920e-1c3100c59b9c",
+      "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1376,
+        960
+      ],
+      "id": "98176721-238d-4609-80eb-c7f01d36a901",
+      "name": "Split Out1"
+    },
+    {
+      "parameters": {
+        "url": "=https://advertising-api-eu.amazon.com/reporting/reports/{{ $('HTTP Request DE1').item.json.reportId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Amazon-Advertising-API-ClientId",
+              "value": "amzn1.application-oa2-client.1859e9c86f7549748ce2ff2cb771a99d"
+            },
+            {
+              "name": "Amazon-Advertising-API-Scope",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        272,
+        960
+      ],
+      "id": "80df7732-cd03-4fcc-991c-42e6c39338bb",
+      "name": "HTTP Request4",
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "eZzq3dhM4itLzrAZ",
+          "name": "BGBV Amazon Ads API auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://advertising-api-eu.amazon.com/reporting/reports",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/vnd.createasyncreportrequest.v3+json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.createasyncreportrequest.v3+json"
+            },
+            {
+              "name": "Amazon-Advertising-API-ClientId",
+              "value": "amzn1.application-oa2-client.1859e9c86f7549748ce2ff2cb771a99d"
+            },
+            {
+              "name": "Amazon-Advertising-API-Scope",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "={\n  \"name\": \"SP Search Terms Daily ({{ (new Date(Date.now() - 8*24*60*60*1000)).toISOString().slice(0,10) }}EU)\",\n  \"startDate\": \"{{ (new Date(Date.now() - 8*24*60*60*1000)).toISOString().slice(0,10) }}\",\n  \"endDate\": \"{{ (new Date(Date.now() - 8*24*60*60*1000)).toISOString().slice(0,10) }}\",\n  \"configuration\": {\n    \"adProduct\": \"SPONSORED_PRODUCTS\",\n    \"reportTypeId\": \"spSearchTerm\",\n    \"timeUnit\": \"DAILY\",\n    \"groupBy\": [\"searchTerm\"],\n    \"columns\": [\n      \"impressions\",\n      \"clicks\",\n      \"costPerClick\",\n      \"clickThroughRate\",\n      \"cost\",\n      \"spend\",\n      \"purchases1d\",\n      \"purchases7d\",\n      \"purchases14d\",\n      \"purchases30d\",\n      \"purchasesSameSku1d\",\n      \"purchasesSameSku7d\",\n      \"purchasesSameSku14d\",\n      \"purchasesSameSku30d\",\n      \"unitsSoldClicks1d\",\n      \"unitsSoldClicks7d\",\n      \"unitsSoldClicks14d\",\n      \"unitsSoldClicks30d\",\n      \"sales1d\",\n      \"sales7d\",\n      \"sales14d\",\n      \"sales30d\",\n      \"attributedSalesSameSku1d\",\n      \"attributedSalesSameSku7d\",\n      \"attributedSalesSameSku14d\",\n      \"attributedSalesSameSku30d\",\n      \"unitsSoldSameSku1d\",\n      \"unitsSoldSameSku7d\",\n      \"unitsSoldSameSku14d\",\n      \"unitsSoldSameSku30d\",\n      \"addToList\",\n      \"salesOtherSku7d\",\n      \"salesOtherSku14d\",\n      \"unitsSoldOtherSku7d\",\n      \"unitsSoldOtherSku14d\",\n      \"purchaseClickRate14d\",\n      \"acosClicks7d\",\n      \"acosClicks14d\",\n      \"roasClicks7d\",\n      \"roasClicks14d\",\n      \"keywordId\",\n      \"keyword\",\n      \"campaignBudgetCurrencyCode\",\n      \"date\",\n      \"portfolioId\",\n      \"searchTerm\",\n      \"campaignName\",\n      \"campaignId\",\n      \"campaignBudgetType\",\n      \"campaignBudgetAmount\",\n      \"campaignStatus\",\n      \"keywordBid\",\n      \"adGroupName\",\n      \"adGroupId\",\n      \"keywordType\",\n      \"matchType\",\n      \"targeting\"\n    ],\n    \"format\": \"GZIP_JSON\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        784
+      ],
+      "id": "cdabccbb-4c75-4e4e-8eb0-21cb4852efa6",
+      "name": "HTTP Request DE1",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "eZzq3dhM4itLzrAZ",
+          "name": "BGBV Amazon Ads API auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const countries = [\n  { code: 'DE', id: '2810922595930270' },\n  { code: 'GB', id: '2490600184706476' },\n  { code: 'ES', id: '1474270049622096' },\n  { code: 'NL', id: '4198735598086995' },\n  { code: 'BE', id: '97377171369615' },\n  { code: 'FR', id: '2257160443303503' },\n  { code: 'PL', id: '2074106727196080' },\n  { code: 'SE', id: '4086650252702269' },\n  { code: 'IE', id: '1189017476003957' },\n  { code: 'IT', id: '1487973095503885' },\n];\n\nreturn countries.map(({ code, id }) => ({ json: { country: code, id } }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -848,
+        880
+      ],
+      "id": "db0ebb40-025d-4a77-a9e3-335b75cab4ed",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -624,
+        880
+      ],
+      "id": "3d9aeb09-1b6c-4ff7-b57d-5b4711711c8f",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        48,
+        976
+      ],
+      "id": "bb73ca1b-fdcb-4277-bec2-c208c46ef1bc",
+      "name": "Loop Over Items3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const countries = [\n  { code: 'DE', id: '2810922595930270' },\n  { code: 'GB', id: '2490600184706476' },\n  { code: 'ES', id: '1474270049622096' },\n  { code: 'NL', id: '4198735598086995' },\n  { code: 'BE', id: '97377171369615' },\n  { code: 'FR', id: '2257160443303503' },\n  { code: 'PL', id: '2074106727196080' },\n  { code: 'SE', id: '4086650252702269' },\n  { code: 'IE', id: '1189017476003957' },\n  { code: 'IT', id: '1487973095503885' },\n];\n\nreturn countries.map(({ code, id }) => ({ json: { country: code, id } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        976
+      ],
+      "id": "e0ca7261-c1c6-44a1-81ec-1d4753d40668",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "s_products_search_terms",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "country",
+              "fieldValue": "={{ $('Loop Over Items3').item.json.country }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1792,
+        960
+      ],
+      "id": "8949a782-e2b4-4587-a7fa-d1cfcf863e83",
+      "name": "Update a row1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "zYjgwJ1kiPWNJ36y",
+          "name": "Supabase account (on Supabase)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 45,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -400,
+        976
+      ],
+      "id": "9378d60d-c73a-4b33-8127-eff44f19fb95",
+      "name": "Wait1",
+      "webhookId": "10d97e8e-eb87-4aa1-9a5e-315cb0fa077e"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3d5606ed-3480-4000-a9bf-37e2965304e8",
+              "leftValue": "={{ Array.isArray($json.data) ? $json.data.length   : Array.isArray($json.records) ? $json.records.length   : Array.isArray($json) ? $json.length   : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1184,
+        192
+      ],
+      "id": "3bde86fd-aa3f-4b7f-9153-bca0e9d55552",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3d5606ed-3480-4000-a9bf-37e2965304e8",
+              "leftValue": "={{ Array.isArray($json.data) ? $json.data.length   : Array.isArray($json.records) ? $json.records.length   : Array.isArray($json) ? $json.length   : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1152,
+        976
+      ],
+      "id": "7919e1e4-f88e-4913-9343-af0e21cc251e",
+      "name": "If1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Compression",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compression": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Create a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a row": {
+      "main": [
+        [
+          {
+            "node": "Update a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request DE": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request DE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items2": {
+      "main": [
+        [],
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a row": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        []
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        []
+      ]
+    },
+    "Create a row1": {
+      "main": [
+        [
+          {
+            "node": "Update a row1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "Compression1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compression1": {
+      "main": [
+        [
+          {
+            "node": "Extract from File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File1": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out1": {
+      "main": [
+        [
+          {
+            "node": "Create a row1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request4": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request DE1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request DE1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items3": {
+      "main": [
+        [],
+        [
+          {
+            "node": "HTTP Request4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a row1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Split Out1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "95057086-52c3-4e2c-bbad-c30ee3d07506",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9c9ff7cd5d398b5463ab937f8344443a2bf26da12c1f7b7592d66ebcffb9a9cd"
+  },
+  "id": "ypoeKPLVtN0fVw2l",
+  "tags": []
+}
