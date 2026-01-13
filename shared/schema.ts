@@ -73,6 +73,9 @@ export const brandPlacement = pgTable('s_brand_placment', {
 });
 
 // Product Search Terms table - TEXT columns (legacy structure)
+// NOTE: The "targeting" column contains the keyword/ASIN you bid on (what you set bids for)
+// The "searchTerm" column contains what the customer actually searched for
+// Bid recommendations should be grouped by "targeting", not "searchTerm"
 export const productSearchTerms = pgTable('s_products_search_terms', {
   id: bigint("id", { mode: "number" }).primaryKey(),
   
