@@ -1,7 +1,7 @@
 import { getConfidenceLevel } from './calculations';
 
-interface SearchTermData {
-  searchTerm: string;
+interface TargetingData {
+  targeting: string;
   clicks: number;
   impressions: number;
   cost: number;
@@ -15,7 +15,7 @@ interface SearchTermData {
 }
 
 interface BidRecommendation {
-  searchTerm: string;
+  targeting: string;
   currentBid: number;
   proposedBid: number;
   delta: number;
@@ -47,11 +47,11 @@ const HIGH_IMPRESSIONS_THRESHOLD = 1000;
 const LOW_SPEND_THRESHOLD = 0.10; // €0.10
 
 export function generateBidRecommendation(
-  term: SearchTermData,
+  term: TargetingData,
   targetAcos: number = TARGET_ACOS,
   campaignMedianCPC: number = 1.0
 ): BidRecommendation | null {
-  const { searchTerm, clicks, impressions, cost, sales, orders, currentBid, cpc, matchType, campaignName, adGroupName } = term;
+  const { targeting, clicks, impressions, cost, sales, orders, currentBid, cpc, matchType, campaignName, adGroupName } = term;
   
   const lowerBound = targetAcos * 0.8;
   const upperBound = targetAcos * 1.1;
@@ -122,7 +122,7 @@ export function generateBidRecommendation(
   const deltaPercent = baseBid > 0 ? (delta / baseBid) * 100 : 0;
 
   return {
-    searchTerm,
+    targeting,
     currentBid: Math.round(baseBid * 100) / 100,
     proposedBid,
     delta: Math.round(delta * 100) / 100,
@@ -147,7 +147,7 @@ export function generateBidRecommendation(
 }
 
 export function generateBulkRecommendations(
-  terms: SearchTermData[],
+  terms: TargetingData[],
   targetAcos: number = TARGET_ACOS
 ): BidRecommendation[] {
   const cpcs = terms.filter(t => t.cpc > 0).map(t => t.cpc);
@@ -172,7 +172,7 @@ export function generateBulkRecommendations(
 }
 
 interface NegativeKeywordCandidate {
-  searchTerm: string;
+  targeting: string;
   type: 'Exact' | 'Phrase';
   clicks: number;
   impressions: number;
@@ -183,7 +183,7 @@ interface NegativeKeywordCandidate {
 }
 
 export function detectNegativeKeywords(
-  terms: SearchTermData[],
+  terms: TargetingData[],
   minClicks: number = 20
 ): NegativeKeywordCandidate[] {
   const candidates: NegativeKeywordCandidate[] = [];
@@ -193,7 +193,7 @@ export function detectNegativeKeywords(
   const tokenGroups: Record<string, typeof wastefulTerms> = {};
   
   wastefulTerms.forEach(term => {
-    const tokens = term.searchTerm.toLowerCase().split(/\s+/).sort().join(' ');
+    const tokens = term.targeting.toLowerCase().split(/\s+/).sort().join(' ');
     if (!tokenGroups[tokens]) {
       tokenGroups[tokens] = [];
     }
@@ -201,7 +201,7 @@ export function detectNegativeKeywords(
   });
 
   wastefulTerms.forEach(term => {
-    const cluster = tokenGroups[term.searchTerm.toLowerCase().split(/\s+/).sort().join(' ')];
+    const cluster = tokenGroups[term.targeting.toLowerCase().split(/\s+/).sort().join(' ')];
     
     let priority: 'High' | 'Medium' | 'Low' = 'Low';
     if (term.clicks >= 100 || term.cost >= 50) priority = 'High';
@@ -211,9 +211,9 @@ export function detectNegativeKeywords(
       const totalClicks = cluster.reduce((sum, t) => sum + t.clicks, 0);
       const totalCost = cluster.reduce((sum, t) => sum + t.cost, 0);
       
-      if (!candidates.find(c => c.searchTerm === term.searchTerm)) {
+      if (!candidates.find(c => c.targeting === term.targeting)) {
         candidates.push({
-          searchTerm: term.searchTerm,
+          targeting: term.targeting,
           type: 'Phrase',
           clicks: term.clicks,
           impressions: term.impressions,
@@ -225,7 +225,7 @@ export function detectNegativeKeywords(
       }
     } else {
       candidates.push({
-        searchTerm: term.searchTerm,
+        targeting: term.targeting,
         type: 'Exact',
         clicks: term.clicks,
         impressions: term.impressions,
@@ -248,7 +248,7 @@ export function detectNegativeKeywords(
 
 export function formatRecommendationsForCSV(recommendations: BidRecommendation[], includeContext: boolean = false): string {
   const baseHeaders = [
-    'Search Term',
+    'Targeting',
     'Match Type',
     'Current Bid',
     'Proposed Bid',
@@ -273,7 +273,7 @@ export function formatRecommendationsForCSV(recommendations: BidRecommendation[]
   
   const rows = recommendations.map(rec => {
     const baseRow = [
-      `"${rec.searchTerm.replace(/"/g, '""')}"`,
+      `"${rec.targeting.replace(/"/g, '""')}"`,
       rec.matchType || '',
       rec.currentBid.toFixed(2),
       rec.proposedBid.toFixed(2),
@@ -307,7 +307,7 @@ export function formatRecommendationsForCSV(recommendations: BidRecommendation[]
 
 export function formatNegativeKeywordsForCSV(candidates: NegativeKeywordCandidate[]): string {
   const headers = [
-    'Search Term',
+    'Targeting',
     'Negative Type',
     'Priority',
     'Clicks',
@@ -318,7 +318,7 @@ export function formatNegativeKeywordsForCSV(candidates: NegativeKeywordCandidat
   ];
   
   const rows = candidates.map(c => [
-    `"${c.searchTerm.replace(/"/g, '""')}"`,
+    `"${c.targeting.replace(/"/g, '""')}"`,
     c.type,
     c.priority,
     c.clicks,

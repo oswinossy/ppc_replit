@@ -5,7 +5,7 @@ import ConfidenceBadge from "./ConfidenceBadge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface RecommendationCardProps {
-  searchTerm: string;
+  targeting: string;
   currentBid: number;
   proposedBid: number;
   clicks: number;
@@ -16,7 +16,7 @@ interface RecommendationCardProps {
 }
 
 export default function RecommendationCard({
-  searchTerm,
+  targeting,
   currentBid,
   proposedBid,
   clicks,
@@ -29,11 +29,11 @@ export default function RecommendationCard({
   const deltaColor = delta > 0 ? "text-green-500" : delta < 0 ? "text-error" : "text-muted-foreground";
 
   return (
-    <Card className="p-4" data-testid={`recommendation-${searchTerm}`}>
+    <Card className="p-4" data-testid={`recommendation-${targeting}`}>
       <div className="space-y-3">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <h4 className="font-medium truncate">{searchTerm}</h4>
+            <h4 className="font-medium truncate">{targeting}</h4>
             <p className="text-xs text-muted-foreground mt-1">
               {clicks} clicks · ACOS {acos.toFixed(1)}% (target: {target}%)
             </p>
@@ -61,7 +61,7 @@ export default function RecommendationCard({
           <p className="text-xs text-muted-foreground flex-1">{rationale}</p>
         </div>
 
-        <Button size="sm" className="w-full" data-testid={`apply-recommendation-${searchTerm}`}>
+        <Button size="sm" className="w-full" data-testid={`apply-recommendation-${targeting}`}>
           Apply Recommendation
         </Button>
       </div>

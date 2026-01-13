@@ -228,8 +228,8 @@ export default function AdGroupView() {
           <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-semibold">Search Terms</h2>
-                  <p className="text-sm text-muted-foreground">Performance by search term with bid recommendations</p>
+                  <h2 className="text-xl font-semibold">Targeting</h2>
+                  <p className="text-sm text-muted-foreground">Performance by targeting keyword/ASIN with bid recommendations</p>
                 </div>
                 <Button 
                   className="gap-2" 
@@ -247,7 +247,7 @@ export default function AdGroupView() {
               ) : searchTerms ? (
                 <DataTable
                   columns={[
-                    { key: "searchTerm", label: "Search Term", sortable: true },
+                    { key: "targeting", label: "Targeting", sortable: true },
                     { key: "matchType", label: "Match Type", sortable: true, render: (val) => <Badge variant="outline">{val}</Badge> },
                     { key: "clicks", label: "Clicks", align: "right", sortable: true },
                     { key: "cost", label: "Cost (€)", align: "right", sortable: true, render: (val) => `€${(val ?? 0).toFixed(2)}` },
@@ -293,8 +293,8 @@ export default function AdGroupView() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {recommendations.map((rec: any) => (
                     <RecommendationCard 
-                      key={rec.searchTerm} 
-                      searchTerm={rec.searchTerm}
+                      key={rec.targeting} 
+                      targeting={rec.targeting}
                       currentBid={rec.currentBid}
                       proposedBid={rec.proposedBid}
                       clicks={rec.clicks}

@@ -494,15 +494,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Search terms by ad group endpoint - filters by campaign type
+  // Targeting endpoint - aggregates by targeting (keyword/ASIN you bid on) instead of search term
+  // This aligns with Amazon's Advertising Console where you set bids at the targeting level
   app.get("/api/search-terms", async (req, res) => {
     try {
       const { adGroupId, campaignType = 'products', from, to, convertToEur: convertToEurParam = 'true' } = req.query;
       const convertToEur = convertToEurParam === 'true';
       
       let results: Array<{
-        searchTerm: string | null;
-        keyword: string | null;
+        targeting: string | null;
         matchType: string | null;
         keywordBid: number;
         clicks: number;
@@ -513,16 +513,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }> = [];
 
       if (campaignType === 'brands') {
-        // Query brand search terms only (brand tables don't use adGroupId)
+        // Query brand data - aggregate by keywordText (the targeting)
         const conditions = [];
         if (from) conditions.push(gte(brandSearchTerms.date, from as string));
         if (to) conditions.push(lte(brandSearchTerms.date, to as string));
 
         results = await db
           .select({
-            searchTerm: brandSearchTerms.searchTerm,
-            keyword: sql<string>`MAX(${brandSearchTerms.keywordText})`,
-            matchType: sql<string>`MAX(${brandSearchTerms.matchType})`,
+            targeting: brandSearchTerms.keywordText,
+            matchType: brandSearchTerms.matchType,
             keywordBid: sql<number>`MAX(${brandSearchTerms.keywordBid})`,
             clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
             cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
@@ -532,17 +531,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
           .from(brandSearchTerms)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .groupBy(brandSearchTerms.searchTerm);
+          .groupBy(brandSearchTerms.keywordText, brandSearchTerms.matchType);
       } else if (campaignType === 'display') {
-        // Query display matched target (equivalent to search terms for display, no adGroupId filter)
+        // Query display data - aggregate by targetingText
         const conditions = [];
         if (from) conditions.push(gte(displayMatchedTarget.date, from as string));
         if (to) conditions.push(lte(displayMatchedTarget.date, to as string));
 
         const displayResults = await db
           .select({
-            targetingText: displayMatchedTarget.targetingText,
-            matchedAsin: sql<string>`MAX(${displayMatchedTarget.matchedTargetAsin})`,
+            targeting: displayMatchedTarget.targetingText,
             clicks: sql<number>`COALESCE(SUM(${displayMatchedTarget.clicks}), 0)`,
             cost: sql<number>`COALESCE(SUM(${displayMatchedTarget.cost}), 0)`,
             sales: sql<number>`COALESCE(SUM(${displayMatchedTarget.sales}), 0)`,
@@ -553,10 +551,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(conditions.length > 0 ? and(...conditions) : undefined)
           .groupBy(displayMatchedTarget.targetingText);
 
-        // Map display results to match the search terms structure
+        // Map display results to match the structure
         results = displayResults.map(row => ({
-          searchTerm: row.targetingText,
-          keyword: row.matchedAsin,
+          targeting: row.targeting,
           matchType: 'Display',
           keywordBid: 0, // Display doesn't have keyword bids like search
           clicks: Number(row.clicks),
@@ -566,7 +563,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           currency: row.currency,
         }));
       } else {
-        // Default: Query product search terms only
+        // Default: Query product data - aggregate by targeting (the keyword you bid on)
         const conditions = [];
         if (adGroupId) conditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
         if (from) conditions.push(gte(productSearchTerms.date, from as string));
@@ -574,8 +571,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         results = await db
           .select({
-            searchTerm: productSearchTerms.searchTerm,
-            keyword: sql<string>`MAX(${productSearchTerms.keyword})`,
+            targeting: productSearchTerms.targeting,
             matchType: productSearchTerms.matchType,
             keywordBid: sql<number>`MAX(${productSearchTerms.keywordBid})`,
             clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
@@ -586,11 +582,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
           .from(productSearchTerms)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .groupBy(productSearchTerms.searchTerm, productSearchTerms.matchType);
+          .groupBy(productSearchTerms.targeting, productSearchTerms.matchType);
       }
 
-      const searchTerms = results
-        .filter(row => row.searchTerm)
+      const targetingData = results
+        .filter(row => row.targeting)
         .map(row => {
           const acos = calculateACOS(row.cost, row.sales);
           const cpc = calculateCPC(row.cost, row.clicks);
@@ -607,7 +603,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let action: string | null = null;
           const confidenceData = getConfidenceLevel(row.clicks);
           
-          // Apply PPC AI logic only for terms with 30+ clicks
+          // Apply PPC AI logic only for targetings with 30+ clicks
           if (row.clicks >= 30) {
             if (row.sales === 0) {
               // No sales - reduce bid incrementally (capped at -25%)
@@ -647,8 +643,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           return {
-            searchTerm: row.searchTerm,
-            keyword: row.keyword,
+            targeting: row.targeting,
             matchType: row.matchType,
             clicks: Number(row.clicks),
             cost: Number(row.cost),
@@ -670,8 +665,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .sort((a, b) => b.clicks - a.clicks);
 
       // Multi-currency guard: prevent mixing currencies when not converting to EUR
-      if (!convertToEur && searchTerms.length > 0) {
-        const currencies = new Set(searchTerms.map(row => row.currency).filter(Boolean));
+      if (!convertToEur && targetingData.length > 0) {
+        const currencies = new Set(targetingData.map(row => row.currency).filter(Boolean));
         if (currencies.size > 1) {
           return res.status(400).json({ 
             error: 'Cannot aggregate data from multiple currencies without EUR conversion',
@@ -681,10 +676,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      res.json(searchTerms);
+      res.json(targetingData);
     } catch (error) {
-      console.error('Search terms error:', error);
-      res.status(500).json({ error: 'Failed to fetch search terms' });
+      console.error('Targeting error:', error);
+      res.status(500).json({ error: 'Failed to fetch targeting data' });
     }
   });
 
@@ -1307,7 +1302,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const results = await db
         .select({
-          searchTerm: productSearchTerms.searchTerm,
+          targeting: productSearchTerms.targeting,
           campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
           adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
@@ -1318,11 +1313,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .from(productSearchTerms)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(productSearchTerms.searchTerm);
+        .groupBy(productSearchTerms.targeting);
 
       const negatives = detectNegativeKeywords(
         results.map(row => ({
-          searchTerm: row.searchTerm || '',
+          targeting: row.targeting || '',
           clicks: Number(row.clicks),
           impressions: Number(row.impressions),
           cost: Number(row.cost),
@@ -1351,7 +1346,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const results = await db
         .select({
-          searchTerm: productSearchTerms.searchTerm,
+          targeting: productSearchTerms.targeting,
           campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
           adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
           clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
@@ -1362,11 +1357,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .from(productSearchTerms)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(productSearchTerms.searchTerm);
+        .groupBy(productSearchTerms.targeting);
 
       const negatives = detectNegativeKeywords(
         results.map(row => ({
-          searchTerm: row.searchTerm || '',
+          targeting: row.targeting || '',
           clicks: Number(row.clicks),
           impressions: Number(row.impressions),
           cost: Number(row.cost),
@@ -1408,7 +1403,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Group by all context fields to ensure correct attribution
       const results = await db
         .select({
-          searchTerm: productSearchTerms.searchTerm,
+          targeting: productSearchTerms.targeting,
           matchType: productSearchTerms.matchType,
           campaignName: productSearchTerms.campaignName,
           adGroupName: productSearchTerms.adGroupName,
@@ -1422,14 +1417,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(productSearchTerms)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .groupBy(
-          productSearchTerms.searchTerm, 
+          productSearchTerms.targeting, 
           productSearchTerms.matchType,
           productSearchTerms.campaignName,
           productSearchTerms.adGroupName
         );
 
-      const termsData = results.map(row => ({
-        searchTerm: row.searchTerm || '',
+      const targetingData = results.map(row => ({
+        targeting: row.targeting || '',
         clicks: Number(row.clicks),
         impressions: Number(row.impressions),
         cost: Number(row.cost),
@@ -1442,7 +1437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         adGroupName: row.adGroupName || undefined,
       }));
 
-      const recommendations = generateBulkRecommendations(termsData, 20);
+      const recommendations = generateBulkRecommendations(targetingData, 20);
       
       // Generate CSV with additional context columns for country/campaign exports
       const includeContext = !!(country || (campaignId && !adGroupId));

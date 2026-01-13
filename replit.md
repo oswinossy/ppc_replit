@@ -31,16 +31,16 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - **Database Indexes**: Composite indexes on (date, country, campaignId) for all fact tables (brand_search_terms, product_search_terms, display_matched_target)
     - **Performance Results**: First load ~1.3-1.6s (down from 4-5s), cached loads ~395ms
 - **Core Features**:
-    - **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Search Terms.
+    - **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Targeting.
     - **Campaign Type Segmentation**: Dashboard-level filter allows switching between Sponsored Products, Sponsored Brands, and Display to analyze performance by campaign type.
     - **EUR Currency Conversion**: All metrics displayed in EUR using daily ECB exchange rates; country-specific views show local currency.
     - **Placement Analysis**: Campaign-level performance by placement type (TOS, ROS, PP, UNKNOWN).
     - **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders.
     - **Attribution Window**: Sponsored Products uses 30-day attribution (sales30d, purchases30d) to match Amazon's default dashboard view.
     - **Performance Charts**: Weekly aggregated ACOS and sales trends.
-    - **Bid Recommendations**: 20% ACOS targeting for all search terms with confidence levels.
+    - **Bid Recommendations**: 20% ACOS targeting for all targeting keywords/ASINs with confidence levels. Aggregates by targeting (the keyword/ASIN you bid on) instead of search term (what customers search for), aligning with Amazon's Advertising Console.
     - **Negative Keywords**: Auto-detection (≥20 clicks, $0 sales) with Excel export.
-    - **Date Range Filtering**: Preset periods (7D, 14D, 30D, 60D, 90D) and custom date picker with auto-refresh.
+    - **Date Range Filtering**: Preset periods (14D, 30D, 60D, 365D, Lifetime from Oct 1 2024) and custom date picker with auto-refresh.
 
 ### Feature Specifications
 - **Campaign-Level Placement Bid Adjustments**: Percentage modifiers (not absolute bids) targeting 20% ACOS, scaled by click volume (confidence).
