@@ -50,8 +50,8 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - No sales (≥30 clicks): -25% decrease.
 - **Recommendation Engine**: Provides bid adjustments based on ACOS and sales data, with safeguards (20%-150% of base bid). Confidence levels (Extreme, High, Good, OK) are based on click volume.
 - **Currency Conversion System**:
-    - **Dashboard**: All metrics displayed in EUR with full conversion from all currencies (USD, GBP, SEK, PLN, JPY) using daily ECB exchange rates.
-    - **Country Views**: Metrics displayed in local currency (USD for US, GBP for GB, SEK for SE, PLN for PL, JPY for JP, EUR for DE/FR/etc).
+    - **Dashboard**: All metrics displayed in EUR with full conversion from all currencies (USD, GBP, SEK, PLN, JPY, CAD) using daily ECB exchange rates.
+    - **Country Views**: Metrics displayed in local currency (USD for US, GBP for GB, SEK for SE, PLN for PL, JPY for JP, CAD for CA, EUR for DE/FR/etc).
     - **Currency Preservation**: Navigation preserves currency throughout drill-down chain (Dashboard → Country → Campaign → Ad Group).
     - **Currency Symbols**: Visual indicators display £, $, kr, zł, ¥, € symbols in country-specific views via CurrencyBadge component.
     - **API Support**: All endpoints (`/api/kpis`, `/api/chart-data`, `/api/campaigns`, `/api/search-terms`) support `convertToEur` parameter.
@@ -59,7 +59,7 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - **Exchange Rates**: Uses Frankfurter API (api.frankfurter.app - European Central Bank) for daily rates with batch date-range support.
     - **Performance Optimization**: Single batch API call via `getExchangeRatesForRange()` replaces 60+ sequential calls, achieving **16-17x speedup** (22s → 1.4s).
     - **Country-to-Currency Mapping**: `productPlacement` table lacks currency field; uses `getCurrencyForCountry()` helper to map country codes to currencies.
-    - **Fallback Rates**: When API lacks data (e.g., future dates), silently uses default rates (USD: 0.92, GBP: 1.17, SEK: 0.088, PLN: 0.23 EUR).
+    - **Fallback Rates**: When API lacks data (e.g., future dates), silently uses default rates (USD: 0.92, GBP: 1.17, SEK: 0.088, PLN: 0.23, CAD: 0.68 EUR).
     - **Frontend Integration**: Centralized `useSearchParams` hook extracts country query parameter; views conditionally pass `convertToEur=false`.
     - **URL Parameters**: Country code propagated via `?country=` query parameter; enables currency persistence across drill-down.
 
