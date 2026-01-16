@@ -20,6 +20,7 @@ interface CurrencyMap {
   PLN: string;
   EUR: string;
   JPY: string;
+  CAD: string;
   [key: string]: string;
 }
 
@@ -30,6 +31,7 @@ const currencyToFrankfurterCode: CurrencyMap = {
   'PLN': 'PLN',
   'EUR': 'EUR',
   'JPY': 'JPY',
+  'CAD': 'CAD',
 };
 
 /**
@@ -177,6 +179,7 @@ function getDefaultRates(): Record<string, number> {
     SEK: 0.088, // ~1 SEK = 0.088 EUR
     PLN: 0.23, // ~1 PLN = 0.23 EUR
     JPY: 0.0063, // ~1 JPY = 0.0063 EUR (~159 JPY per EUR)
+    CAD: 0.68, // ~1 CAD = 0.68 EUR
   };
 }
 
