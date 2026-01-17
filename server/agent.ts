@@ -43,6 +43,9 @@ Key columns: date, targetingText, targetingExpression, campaignName, campaignId,
 **bid_change_history** - Bid change tracking
 Key columns: id, campaignType (products/brands), targeting, campaignId, adGroupId, campaignName, adGroupName, country, dateAdjusted, currentBid, previousBid, matchType
 
+**Bid Adjustments** - Campaign bid adjustments and settings
+Key columns: id, CampaignId, name (campaign name), country, state, portfolioId, startDate, budget, budgetType, biddingStrategy, placement, percent, created_at
+
 ## Guidelines
 1. Use query_database for detailed/custom queries. Use other tools for common aggregations.
 2. Provide specific, actionable insights based on the data
@@ -960,6 +963,10 @@ const TABLE_SCHEMAS: Record<string, TableSchema> = {
   'bid_change_history': {
     columns: ['id', 'campaignType', 'targeting', 'campaignId', 'adGroupId', 'campaignName', 'adGroupName', 'country', 'dateAdjusted', 'currentBid', 'previousBid', 'matchType'],
     dateColumn: 'dateAdjusted'
+  },
+  'Bid Adjustments': {
+    columns: ['id', 'CampaignId', 'name', 'country', 'state', 'portfolioId', 'startDate', 'budget', 'budgetType', 'biddingStrategy', 'placement', 'percent', 'created_at'],
+    dateColumn: 'startDate'
   }
 };
 
