@@ -6,7 +6,8 @@ import { sql, eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR, calculateROAS, getConfidenceLevel } from "./utils/calculations";
 import { generateBidRecommendation, detectNegativeKeywords, generateBulkRecommendations, formatRecommendationsForCSV } from "./utils/recommendations";
 import { getExchangeRatesForDate, getExchangeRatesForRange, convertToEur } from "./utils/exchangeRates";
-import { normalizePlacementName, getCurrencyForCountry } from "@shared/currency";
+import { normalizePlacementName, getCurrencyForCountry, BID_ADJUSTMENT_PLACEMENT_MAP } from "@shared/currency";
+import postgres from "postgres";
 import * as XLSX from 'xlsx';
 import { getCached, setCache, generateCacheKey } from "./cache";
 import { queryAgent, queryAgentStream } from "./agent";
@@ -795,6 +796,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(productPlacement)
         .where(conditions.length > 0 ? and(...conditions) : undefined);
 
+      // Fetch latest bid adjustments from "Bid Adjustments" table for this campaign
+      let bidAdjustmentsMap = new Map<string, number>();
+      if (campaignId) {
+        try {
+          const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+          const sqlClient = postgres(connectionUrl);
+          const bidAdjustments = await sqlClient`
+            SELECT DISTINCT ON (placement)
+              placement, percent
+            FROM "Bid Adjustments"
+            WHERE "CampaignId"::text = ${campaignId as string}
+            ORDER BY placement, created_at DESC
+          `;
+          await sqlClient.end();
+          
+          // Map bid adjustment table placement names to normalized names
+          for (const row of bidAdjustments) {
+            const placement = row.placement as string;
+            const percent = row.percent as number;
+            const normalizedPlacement = BID_ADJUSTMENT_PLACEMENT_MAP[placement];
+            if (normalizedPlacement) {
+              bidAdjustmentsMap.set(normalizedPlacement, percent);
+            }
+          }
+        } catch (bidError) {
+          console.warn('Could not fetch bid adjustments:', bidError);
+        }
+      }
+
       // Get date range for exchange rates (fetch all at once with single API call)
       const allDates = allResults.map(r => r.date).filter(Boolean);
       const minDate = allDates.length > 0 ? allDates.reduce((a, b) => a! < b! ? a : b) : null;
@@ -891,10 +921,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Round to nearest integer
         recommendedBidAdjustment = Math.round(recommendedBidAdjustment);
 
+        const normalizedPlacement = normalizePlacementName(group.placement);
+        const bidAdjustment = bidAdjustmentsMap.get(normalizedPlacement) ?? null;
+        
         return {
-          placement: normalizePlacementName(group.placement),
+          placement: normalizedPlacement,
           biddingStrategy: group.biddingStrategy,
-          bidAdjustment: null, // Current bid adjustment from Amazon (not in our data yet)
+          bidAdjustment,
           impressions: group.totalImpressions,
           clicks: group.totalClicks,
           ctr,

@@ -92,3 +92,28 @@ export function normalizePlacementName(placement: string | null): string {
   
   return normalizedMap[placement] || placement;
 }
+
+/**
+ * Map "Bid Adjustments" table placement names to normalized placement names
+ * This enables linking bid adjustment percentages to placement performance data
+ */
+export const BID_ADJUSTMENT_PLACEMENT_MAP: Record<string, string> = {
+  'Placement Top': 'Top of search (first page)',
+  'Placement Product Page': 'Product pages',
+  'Placement Rest Of Search': 'Rest of search',
+  'Site Amazon Business': 'Amazon Business',
+};
+
+/**
+ * Get the bid adjustment table placement key from normalized placement name
+ * Used for reverse lookup when querying bid adjustments
+ */
+export function getBidAdjustmentPlacementKey(normalizedPlacement: string): string | null {
+  const reverseMap: Record<string, string> = {
+    'Top of search (first page)': 'Placement Top',
+    'Product pages': 'Placement Product Page',
+    'Rest of search': 'Placement Rest Of Search',
+    'Amazon Business': 'Site Amazon Business',
+  };
+  return reverseMap[normalizedPlacement] || null;
+}
