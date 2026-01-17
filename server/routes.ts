@@ -799,9 +799,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch latest bid adjustments from "Bid Adjustments" table for this campaign
       let bidAdjustmentsMap = new Map<string, number>();
       if (campaignId) {
+        const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+        const sqlClient = postgres(connectionUrl);
         try {
-          const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-          const sqlClient = postgres(connectionUrl);
           const bidAdjustments = await sqlClient`
             SELECT DISTINCT ON (placement)
               placement, percent
@@ -809,7 +809,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             WHERE "CampaignId"::text = ${campaignId as string}
             ORDER BY placement, created_at DESC
           `;
-          await sqlClient.end();
           
           // Map bid adjustment table placement names to normalized names
           for (const row of bidAdjustments) {
@@ -822,6 +821,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } catch (bidError) {
           console.warn('Could not fetch bid adjustments:', bidError);
+        } finally {
+          await sqlClient.end();
         }
       }
 

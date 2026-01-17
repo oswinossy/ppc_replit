@@ -81,6 +81,19 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - API responses include calculated fields: `cpc`, `cvr`, `acos`.
     - Frontend renders use null guards for numeric values: `(val ?? 0).toFixed(2)`.
 
+### Bid Adjustments Integration (Jan 2026)
+- **Purpose**: Links campaign-level bid adjustment percentages from Amazon to placement performance data
+- **Data Source**: "Bid Adjustments" table in Supabase (currently contains IT data, extensible to all countries)
+- **Placement Mapping**: Maps Amazon's internal placement names to normalized display names:
+    - `Placement Top` → "Top of search (first page)"
+    - `Placement Product Page` → "Product pages"  
+    - `Placement Rest Of Search` → "Rest of search"
+    - `Site Amazon Business` → "Amazon Business"
+- **Query Logic**: Uses `DISTINCT ON (placement) ... ORDER BY placement, created_at DESC` to fetch most recent adjustment per placement per campaign
+- **Integration Point**: `/api/campaign-placements` endpoint now returns `bidAdjustment` field with actual percentages from the table
+- **Fallback**: Returns `null` for placements without bid adjustment data (graceful degradation)
+- **Error Handling**: Connection errors are caught and logged; endpoint continues to work without bid adjustments if fetch fails
+
 ### Bid Change History Tracking
 - **Purpose**: Tracks when keyword bids are adjusted to analyze performance since the last bid change
 - **Supported Campaign Types**: Sponsored Products and Sponsored Brands (Display campaigns lack bid data)
