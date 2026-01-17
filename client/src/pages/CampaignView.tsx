@@ -293,21 +293,21 @@ export default function CampaignView() {
                   { key: "sales", label: "Sales", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
                   { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
                   { 
-                    key: "recommendedBidAdjustment", 
-                    label: "Recommended Bid Adjustment", 
+                    key: "targetBidAdjustment", 
+                    label: "Target Bid Adjustment", 
                     align: "right", 
                     sortable: true,
-                    cellClassName: (val) => {
-                      const adjustment = Number(val ?? 0);
-                      if (adjustment === 0) return "text-muted-foreground";
-                      if (adjustment > 0) return "font-semibold text-green-600 dark:text-green-400";
+                    cellClassName: (val, row) => {
+                      if (val === null || val === undefined) return "text-muted-foreground";
+                      const target = Number(val);
+                      const current = Number(row?.bidAdjustment ?? 0);
+                      if (target === current) return "text-muted-foreground";
+                      if (target > current) return "font-semibold text-green-600 dark:text-green-400";
                       return "font-semibold text-red-600 dark:text-red-400";
                     },
                     render: (val) => {
-                      const adjustment = Number(val ?? 0);
-                      if (adjustment === 0) return "-";
-                      if (adjustment > 0) return `+${adjustment}%`;
-                      return `${adjustment}%`;
+                      if (val === null || val === undefined) return "-";
+                      return `${val}%`;
                     }
                   },
                 ]}

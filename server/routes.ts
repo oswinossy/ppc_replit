@@ -813,7 +813,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Map bid adjustment table placement names to normalized names
           for (const row of bidAdjustments) {
             const placement = row.placement as string;
-            const percent = row.percent as number;
+            const percent = Number(row.percent ?? 0);
             const normalizedPlacement = BID_ADJUSTMENT_PLACEMENT_MAP[placement];
             if (normalizedPlacement) {
               bidAdjustmentsMap.set(normalizedPlacement, percent);
@@ -892,37 +892,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const ctr = group.totalImpressions > 0 ? (group.totalClicks / group.totalImpressions) * 100 : 0;
         const cvr = group.totalClicks > 0 ? (group.totalOrders / group.totalClicks) * 100 : 0;
         
-        // Calculate recommended bid adjustment based on ACOS
-        let recommendedBidAdjustment = 0;
+        const normalizedPlacement = normalizePlacementName(group.placement);
+        const currentBidAdjustment = bidAdjustmentsMap.get(normalizedPlacement) ?? 0;
+        
+        // Calculate recommended change in bid adjustment based on ACOS
+        let recommendedChange = 0;
         
         if (group.totalClicks >= 30 && group.totalSalesEur > 0) {
           if (acos <= targetAcos * 0.8) {
             // ACOS well below target (≤16%), increase bid adjustment
             if (group.totalClicks >= 1000) {
-              recommendedBidAdjustment = 20; // +20%
+              recommendedChange = 20; // +20 percentage points
             } else if (group.totalClicks >= 300) {
-              recommendedBidAdjustment = 15; // +15%
+              recommendedChange = 15; // +15 percentage points
             } else {
-              recommendedBidAdjustment = 10; // +10%
+              recommendedChange = 10; // +10 percentage points
             }
           } else if (acos > targetAcos) {
             // ACOS above target, decrease bid adjustment using formula
-            const targetAdjustment = (targetAcos / acos - 1) * 100;
-            recommendedBidAdjustment = Math.max(-50, Math.min(0, targetAdjustment)); // Cap at -50%
+            const targetChange = (targetAcos / acos - 1) * 100;
+            recommendedChange = Math.max(-50, Math.min(0, targetChange)); // Cap change at -50 points
           } else {
             // ACOS near target, small adjustment
-            recommendedBidAdjustment = (targetAcos / acos - 1) * 100;
-            recommendedBidAdjustment = Math.max(-10, Math.min(10, recommendedBidAdjustment));
+            recommendedChange = (targetAcos / acos - 1) * 100;
+            recommendedChange = Math.max(-10, Math.min(10, recommendedChange));
           }
         } else if (group.totalClicks >= 30 && group.totalSalesEur === 0) {
           // No sales, recommend decreasing bid
-          recommendedBidAdjustment = -25; // -25%
+          recommendedChange = -25; // -25 percentage points
         }
         
-        // Round to nearest integer
-        recommendedBidAdjustment = Math.round(recommendedBidAdjustment);
+        // Calculate target bid adjustment: current + change, capped between 0% and 900%
+        let targetBidAdjustment: number | null = null;
+        if (group.totalClicks >= 30) {
+          const rawTarget = currentBidAdjustment + recommendedChange;
+          targetBidAdjustment = Math.round(Math.max(0, Math.min(900, rawTarget)));
+        }
 
-        const normalizedPlacement = normalizePlacementName(group.placement);
         const bidAdjustment = bidAdjustmentsMap.get(normalizedPlacement) ?? null;
         
         return {
@@ -938,7 +944,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sales: group.totalSalesEur,
           acos,
           cvr,
-          recommendedBidAdjustment,
+          targetBidAdjustment,
         };
       });
 
