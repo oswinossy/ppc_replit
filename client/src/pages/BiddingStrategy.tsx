@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowDown, ArrowUp, Check, Download, ChevronRight, TrendingDown, TrendingUp, Target, Info, Clock, Zap, AlertTriangle, Settings } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Download, ChevronRight, TrendingDown, TrendingUp, Target, Info, Clock, Zap, AlertTriangle, Settings, Layers } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -46,6 +46,7 @@ interface BiddingRecommendation {
   days_since_change: number;
   last_change_date: string | null;
   reason: string;
+  hasPlacementRecs?: boolean;
 }
 
 interface BiddingStrategyResponse {
@@ -535,9 +536,27 @@ export default function BiddingStrategy() {
                             <TableRow key={`${rec.campaign_id}-${rec.targeting}-${i}`} data-testid={`row-recommendation-${i}`}>
                               <TableCell>
                                 <div className="font-medium">{rec.targeting}</div>
-                                {rec.match_type && (
-                                  <Badge variant="outline" className="text-xs mt-1">{rec.match_type}</Badge>
-                                )}
+                                <div className="flex items-center gap-1 mt-1">
+                                  {rec.match_type && (
+                                    <Badge variant="outline" className="text-xs">{rec.match_type}</Badge>
+                                  )}
+                                  {rec.hasPlacementRecs && (
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Link href={`/campaign/${rec.campaign_id}?country=${selectedCountry}&campaignType=products&view=placements`}>
+                                          <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/30 cursor-pointer hover-elevate">
+                                            <Layers className="h-3 w-3 mr-1" />
+                                            +Placement
+                                          </Badge>
+                                        </Link>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>This campaign also has placement adjustment recommendations.</p>
+                                        <p className="text-muted-foreground text-xs mt-1">Click to view placements</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell>
                                 <div className="text-sm">{rec.campaign_name}</div>

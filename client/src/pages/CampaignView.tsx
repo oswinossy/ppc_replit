@@ -9,10 +9,12 @@ import ACOSBadge from "@/components/ACOSBadge";
 import CurrencyBadge from "@/components/CurrencyBadge";
 import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
-import { Download, TrendingUp } from "lucide-react";
+import { Download, TrendingUp, Target } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Link } from "wouter";
 import { useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useSearchParams } from "@/hooks/useSearchParams";
@@ -24,15 +26,25 @@ export default function CampaignView() {
   const [, setLocation] = useLocation();
   const campaignId = params?.id || "";
   
-  // Extract country and campaignType from query parameters
-  const { country: countryCode, campaignType } = useSearchParams();
+  // Extract country, campaignType, and view from query parameters
+  const searchParams = useSearchParams();
+  const countryCode = searchParams.country;
+  const campaignType = searchParams.campaignType;
+  const initialView = searchParams.get('view') as ViewMode;
   
   // Get display name for campaign type
   const campaignTypeLabel = campaignType === 'brands' ? 'Sponsored Brands' : 
                             campaignType === 'display' ? 'Display' : 'Sponsored Products';
   
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
-  const [viewMode, setViewMode] = useState<ViewMode>('search-terms');
+  const [viewMode, setViewMode] = useState<ViewMode>(initialView === 'placements' ? 'placements' : 'search-terms');
+  
+  // Auto-switch to placements view if URL has view=placements
+  useEffect(() => {
+    if (initialView === 'placements' && viewMode !== 'placements') {
+      setViewMode('placements');
+    }
+  }, [initialView]);
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
     queryKey: ['/api/kpis', campaignId, countryCode, campaignType, dateRange],
@@ -271,10 +283,26 @@ export default function CampaignView() {
                 <h2 className="text-xl font-semibold">Placements</h2>
                 <p className="text-sm text-muted-foreground">Campaign-level placement performance and bid adjustments</p>
               </div>
+              {placements?.hasKeywordRecs && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link href={`/bidding-strategy?country=${countryCode || ''}`}>
+                      <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 cursor-pointer hover-elevate">
+                        <Target className="h-3 w-3 mr-1" />
+                        {placements.keywordRecCount} Keyword Adjustments
+                      </Badge>
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>This campaign also has {placements.keywordRecCount} keyword bid recommendations.</p>
+                    <p className="text-muted-foreground text-xs mt-1">Click to view Bidding Strategy</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
             </div>
             {placementsLoading ? (
               <Skeleton className="h-64" />
-            ) : placements ? (
+            ) : placements?.placements ? (
               <DataTable
                 columns={[
                   { key: "placement", label: "Placement", sortable: true },
@@ -311,7 +339,7 @@ export default function CampaignView() {
                     }
                   },
                 ]}
-                data={placements}
+                data={placements.placements}
               />
             ) : null}
           </div>

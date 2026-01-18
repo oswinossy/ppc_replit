@@ -995,7 +995,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return orderA - orderB;
       });
 
-      res.json(placements);
+      // Cross-check: Does this campaign also have keyword bid recommendations?
+      let hasKeywordRecs = false;
+      let keywordRecCount = 0;
+      
+      // Get campaign's country for filtering
+      const campaignCountry = allResults.length > 0 ? allResults[0].country : null;
+      
+      if (campaignId && campaignCountry) {
+        const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+        const sqlClient = postgres(connectionUrl);
+        try {
+          // Get ACOS target for this campaign
+          const acosTargetResult = await sqlClient`
+            SELECT acos_target FROM "ACOS_Target_Campaign" 
+            WHERE campaign_id = ${campaignId as string}
+            LIMIT 1
+          `;
+          
+          if (acosTargetResult.length > 0) {
+            const acosTarget = Number(acosTargetResult[0].acos_target);
+            const acosWindow = 0.03; // ±3%
+            
+            // Check if there are keywords with ACOS outside the window
+            const keywordCheckResult = await sqlClient`
+              SELECT COUNT(*) as count
+              FROM (
+                SELECT 
+                  keyword,
+                  SUM(COALESCE(clicks, 0)) as total_clicks,
+                  SUM(COALESCE(cost, 0)) as total_cost,
+                  SUM(COALESCE(CAST(NULLIF("sales30d", '') AS NUMERIC), 0)) as total_sales
+                FROM "s_products_search_terms"
+                WHERE "campaignId"::text = ${campaignId as string}
+                  AND country = ${campaignCountry}
+                GROUP BY keyword
+                HAVING SUM(COALESCE(clicks, 0)) >= 30
+              ) as keywords
+              WHERE 
+                (total_sales > 0 AND (total_cost / total_sales) < ${acosTarget - acosWindow})
+                OR (total_sales > 0 AND (total_cost / total_sales) > ${acosTarget + acosWindow})
+                OR (total_sales = 0 AND total_clicks >= 30)
+            `;
+            
+            keywordRecCount = Number(keywordCheckResult[0]?.count || 0);
+            hasKeywordRecs = keywordRecCount > 0;
+          }
+        } catch (kwError) {
+          console.warn('Could not check keyword recs:', kwError);
+        } finally {
+          await sqlClient.end();
+        }
+      }
+
+      // Check if any placement has a recommendation
+      const hasPlacementRecs = placements.some(p => 
+        p.targetBidAdjustment !== null && p.targetBidAdjustment !== p.bidAdjustment
+      );
+
+      res.json({
+        placements,
+        hasKeywordRecs,
+        keywordRecCount,
+        hasPlacementRecs,
+        campaignId,
+      });
     } catch (error) {
       console.error('Campaign placements error:', error);
       res.status(500).json({ error: 'Failed to fetch campaign placements' });
@@ -2410,14 +2474,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Cross-check: which campaigns also have placement adjustments needed?
+      // Get unique campaign IDs from keyword recommendations
+      const campaignIds = Array.from(new Set(recommendations.map(r => r.campaign_id)));
+      const campaignsWithPlacementRecs = new Set<string>();
+      
+      if (campaignIds.length > 0) {
+        // For each campaign, check if there are placements with recommended changes
+        // Query placement data for campaigns with keyword recs
+        const placementData = await sqlClient`
+          SELECT 
+            "campaignId"::text as campaign_id,
+            "placementClassification" as placement,
+            SUM(COALESCE(NULLIF(clicks, '')::numeric, 0)) as clicks,
+            SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) as cost,
+            SUM(COALESCE(NULLIF("sales30d", '')::numeric, 0)) as sales
+          FROM "s_products_placement"
+          WHERE country = ${country as string}
+            AND "campaignId"::text = ANY(${campaignIds})
+          GROUP BY "campaignId", "placementClassification"
+          HAVING SUM(COALESCE(NULLIF(clicks, '')::numeric, 0)) >= 30
+        `;
+        
+        // Get ACOS targets for these campaigns
+        for (const row of placementData) {
+          const campaignTarget = acosTargetsMap.get(row.campaign_id);
+          if (!campaignTarget) continue;
+          
+          const targetAcos = campaignTarget.target * 100; // Convert to percentage
+          const clicks = Number(row.clicks);
+          const cost = Number(row.cost);
+          const sales = Number(row.sales);
+          const acos = sales > 0 ? (cost / sales) * 100 : 0;
+          
+          // Check if a placement adjustment would be recommended
+          let hasRecommendation = false;
+          if (clicks >= 30) {
+            if (sales === 0) {
+              hasRecommendation = true; // No sales = recommend decrease
+            } else if (acos <= targetAcos * 0.8 || acos > targetAcos * 1.1) {
+              hasRecommendation = true; // Outside ±10% window
+            }
+          }
+          
+          if (hasRecommendation) {
+            campaignsWithPlacementRecs.add(row.campaign_id);
+          }
+        }
+      }
+      
+      // Add hasPlacementRecs flag to each recommendation
+      const enrichedRecommendations = recommendations.map(rec => ({
+        ...rec,
+        hasPlacementRecs: campaignsWithPlacementRecs.has(rec.campaign_id),
+      }));
+
       await sqlClient.end();
 
       res.json({
         country,
         weights,
-        total_recommendations: recommendations.length,
-        recommendations: recommendations.slice(0, 100), // Limit response size
-        combined_actions: combinedActions
+        total_recommendations: enrichedRecommendations.length,
+        recommendations: enrichedRecommendations.slice(0, 100), // Limit response size
+        combined_actions: combinedActions,
+        campaigns_with_both: Array.from(campaignsWithPlacementRecs),
       });
     } catch (error: any) {
       console.error('Bidding strategy error:', error);
