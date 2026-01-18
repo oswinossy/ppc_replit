@@ -2600,31 +2600,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const strategyResponse = await fetch(`${protocol}://${host}/api/bidding-strategy?country=${country}`);
       const strategyData = await strategyResponse.json();
 
-      const exportData = strategyData.recommendations.map((rec: any) => ({
-        'Country': rec.country,
-        'Campaign Name': rec.campaign_name,
-        'Ad Group Name': rec.ad_group_name,
-        'Targeting': rec.targeting,
-        'Match Type': rec.match_type,
-        'Current Bid': rec.current_bid,
-        'Recommended Bid': rec.recommended_bid,
-        'Change %': `${rec.change_percent}%`,
-        'Action': rec.action,
-        'ACOS Target': `${rec.acos_target_percent}%`,
-        'Weighted ACOS': `${rec.weighted_acos_percent}%`,
-        'T0 ACOS': rec.t0_acos ? `${Math.round(rec.t0_acos * 100)}%` : 'N/A',
-        'T0 Clicks': rec.t0_clicks,
-        '30D ACOS': rec.d30_acos ? `${Math.round(rec.d30_acos * 100)}%` : 'N/A',
-        '30D Clicks': rec.d30_clicks,
-        '365D ACOS': rec.d365_acos ? `${Math.round(rec.d365_acos * 100)}%` : 'N/A',
-        '365D Clicks': rec.d365_clicks,
-        'Lifetime ACOS': rec.lifetime_acos ? `${Math.round(rec.lifetime_acos * 100)}%` : 'N/A',
-        'Lifetime Clicks': rec.lifetime_clicks,
-        'Confidence': rec.confidence,
-        'Days Since Change': rec.days_since_change,
-        'Reason': rec.reason,
-        'Has Placement Recs': rec.hasPlacementRecs ? 'YES - NEEDS BOTH ADJUSTMENTS' : 'No'
-      }));
+      // Get weights for this country to include in export
+      const weights = strategyData.weights || { t0_weight: 0.35, d30_weight: 0.25, d365_weight: 0.25, lifetime_weight: 0.15 };
+      const t0WeightPct = Math.round(weights.t0_weight * 100);
+      const d30WeightPct = Math.round(weights.d30_weight * 100);
+      const d365WeightPct = Math.round(weights.d365_weight * 100);
+      const lifetimeWeightPct = Math.round(weights.lifetime_weight * 100);
+      
+      const exportData = strategyData.recommendations.map((rec: any) => {
+        // Determine which timeframes were used (have valid ACOS data)
+        const timeframesUsed: string[] = [];
+        if (rec.t0_acos !== null) timeframesUsed.push('T0');
+        if (rec.d30_acos !== null) timeframesUsed.push('30D');
+        if (rec.d365_acos !== null) timeframesUsed.push('365D');
+        if (rec.lifetime_acos !== null) timeframesUsed.push('Lifetime');
+        
+        return {
+          'Country': rec.country,
+          'Campaign Name': rec.campaign_name,
+          'Ad Group Name': rec.ad_group_name,
+          'Targeting': rec.targeting,
+          'Match Type': rec.match_type,
+          'Current Bid': rec.current_bid,
+          'Recommended Bid': rec.recommended_bid,
+          'Change %': `${rec.change_percent}%`,
+          'Action': rec.action,
+          'ACOS Target': `${rec.acos_target_percent}%`,
+          'Weighted ACOS': `${rec.weighted_acos_percent}%`,
+          'T0 ACOS': rec.t0_acos ? `${Math.round(rec.t0_acos * 100)}%` : 'N/A',
+          'T0 Clicks': rec.t0_clicks,
+          '30D ACOS': rec.d30_acos ? `${Math.round(rec.d30_acos * 100)}%` : 'N/A',
+          '30D Clicks': rec.d30_clicks,
+          '365D ACOS': rec.d365_acos ? `${Math.round(rec.d365_acos * 100)}%` : 'N/A',
+          '365D Clicks': rec.d365_clicks,
+          'Lifetime ACOS': rec.lifetime_acos ? `${Math.round(rec.lifetime_acos * 100)}%` : 'N/A',
+          'Lifetime Clicks': rec.lifetime_clicks,
+          'Confidence': rec.confidence,
+          'Days Since Change': rec.days_since_change,
+          'Reason': rec.reason,
+          'Timeframes Used': timeframesUsed.join(', ') || 'None',
+          'T0 Weight': `${t0WeightPct}%`,
+          '30D Weight': `${d30WeightPct}%`,
+          '365D Weight': `${d365WeightPct}%`,
+          'Lifetime Weight': `${lifetimeWeightPct}%`,
+          'Has Placement Recs': rec.hasPlacementRecs ? 'YES - NEEDS BOTH ADJUSTMENTS' : 'No'
+        };
+      });
 
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
@@ -2710,6 +2731,156 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(buffer);
     } catch (error: any) {
       console.error('Export placements error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Combined export with both keyword bids and placement adjustments
+  app.get("/api/exports/combined-recommendations.xlsx", async (req, res) => {
+    try {
+      const { country, campaignId } = req.query;
+      
+      if (!country) {
+        return res.status(400).json({ error: 'Country parameter is required' });
+      }
+
+      const host = req.get('host') || 'localhost:5000';
+      const protocol = req.protocol || 'http';
+      const wb = XLSX.utils.book_new();
+
+      // Fetch keyword recommendations
+      const strategyUrl = campaignId 
+        ? `${protocol}://${host}/api/bidding-strategy?country=${country}&campaignId=${campaignId}`
+        : `${protocol}://${host}/api/bidding-strategy?country=${country}`;
+      const strategyResponse = await fetch(strategyUrl);
+      const strategyData = await strategyResponse.json();
+
+      // Get weights for metadata
+      const weights = strategyData.weights || { t0_weight: 0.35, d30_weight: 0.25, d365_weight: 0.25, lifetime_weight: 0.15 };
+      const t0WeightPct = Math.round(weights.t0_weight * 100);
+      const d30WeightPct = Math.round(weights.d30_weight * 100);
+      const d365WeightPct = Math.round(weights.d365_weight * 100);
+      const lifetimeWeightPct = Math.round(weights.lifetime_weight * 100);
+
+      // Create keyword recommendations sheet
+      const keywordData = (strategyData.recommendations || []).map((rec: any) => {
+        const timeframesUsed: string[] = [];
+        if (rec.t0_acos !== null) timeframesUsed.push('T0');
+        if (rec.d30_acos !== null) timeframesUsed.push('30D');
+        if (rec.d365_acos !== null) timeframesUsed.push('365D');
+        if (rec.lifetime_acos !== null) timeframesUsed.push('Lifetime');
+        
+        return {
+          'Recommendation Type': 'Keyword Bid',
+          'Country': rec.country,
+          'Campaign Name': rec.campaign_name,
+          'Ad Group Name': rec.ad_group_name,
+          'Targeting': rec.targeting,
+          'Match Type': rec.match_type,
+          'Current Bid': rec.current_bid,
+          'Recommended Bid': rec.recommended_bid,
+          'Change %': `${rec.change_percent}%`,
+          'Action': rec.action,
+          'ACOS Target': `${rec.acos_target_percent}%`,
+          'Weighted ACOS': `${rec.weighted_acos_percent}%`,
+          'T0 ACOS': rec.t0_acos ? `${Math.round(rec.t0_acos * 100)}%` : 'N/A',
+          '30D ACOS': rec.d30_acos ? `${Math.round(rec.d30_acos * 100)}%` : 'N/A',
+          '365D ACOS': rec.d365_acos ? `${Math.round(rec.d365_acos * 100)}%` : 'N/A',
+          'Lifetime ACOS': rec.lifetime_acos ? `${Math.round(rec.lifetime_acos * 100)}%` : 'N/A',
+          'Confidence': rec.confidence,
+          'Days Since Change': rec.days_since_change,
+          'Timeframes Used': timeframesUsed.join(', ') || 'None',
+          'T0 Weight': `${t0WeightPct}%`,
+          '30D Weight': `${d30WeightPct}%`,
+          '365D Weight': `${d365WeightPct}%`,
+          'Lifetime Weight': `${lifetimeWeightPct}%`,
+          'Has Placement Recs': rec.hasPlacementRecs ? 'YES' : 'No'
+        };
+      });
+
+      if (keywordData.length > 0) {
+        const wsKeywords = XLSX.utils.json_to_sheet(keywordData);
+        XLSX.utils.book_append_sheet(wb, wsKeywords, 'Keyword Recommendations');
+      }
+
+      // Fetch placement recommendations for campaigns with keyword recs
+      const campaignIds = campaignId 
+        ? [campaignId as string]
+        : Array.from(new Set(strategyData.recommendations?.map((r: any) => r.campaign_id) || []));
+
+      const allPlacements: any[] = [];
+      for (const cId of campaignIds.slice(0, 50)) { // Limit to 50 campaigns
+        try {
+          const placementsResponse = await fetch(`${protocol}://${host}/api/campaign-placements?campaignId=${cId}&country=${country}`);
+          const placementsData = await placementsResponse.json();
+          
+          if (placementsData.placements?.length > 0) {
+            // Find campaign name from keyword data
+            const campaignName = strategyData.recommendations?.find((r: any) => r.campaign_id === cId)?.campaign_name || cId;
+            
+            for (const p of placementsData.placements) {
+              if (p.targetBidAdjustment !== null && p.targetBidAdjustment !== p.bidAdjustment) {
+                allPlacements.push({
+                  'Recommendation Type': 'Placement Adjustment',
+                  'Country': country,
+                  'Campaign ID': cId,
+                  'Campaign Name': campaignName,
+                  'Placement': p.placement,
+                  'Bidding Strategy': p.biddingStrategy || 'N/A',
+                  'Current Bid Adjustment': p.bidAdjustment !== null ? `${p.bidAdjustment}%` : 'Not set',
+                  'Recommended Bid Adjustment': p.targetBidAdjustment !== null ? `${p.targetBidAdjustment}%` : 'N/A',
+                  'Change': p.targetBidAdjustment !== null && p.bidAdjustment !== null 
+                    ? `${p.targetBidAdjustment - p.bidAdjustment > 0 ? '+' : ''}${p.targetBidAdjustment - p.bidAdjustment}%`
+                    : 'N/A',
+                  'Clicks': p.clicks,
+                  'ACOS': p.acos ? `${p.acos.toFixed(1)}%` : 'N/A',
+                  'Spend (EUR)': p.spend?.toFixed(2) || '0.00',
+                  'Sales (EUR)': p.sales?.toFixed(2) || '0.00',
+                  'Has Keyword Recs': 'YES'
+                });
+              }
+            }
+          }
+        } catch (placementError) {
+          console.warn(`Could not fetch placements for campaign ${cId}:`, placementError);
+        }
+      }
+
+      if (allPlacements.length > 0) {
+        const wsPlacements = XLSX.utils.json_to_sheet(allPlacements);
+        XLSX.utils.book_append_sheet(wb, wsPlacements, 'Placement Adjustments');
+      }
+
+      // Add metadata sheet
+      const metadataData = [{
+        'Export Date': new Date().toISOString().split('T')[0],
+        'Country': country,
+        'T0 Weight (Since Last Bid Change)': `${t0WeightPct}%`,
+        '30D Weight': `${d30WeightPct}%`,
+        '365D Weight': `${d365WeightPct}%`,
+        'Lifetime Weight': `${lifetimeWeightPct}%`,
+        'Total Keyword Recommendations': keywordData.length,
+        'Total Placement Adjustments': allPlacements.length,
+        'Campaigns with Both Adjustments': Array.from(new Set(allPlacements.map(p => p['Campaign ID']))).length,
+        'Note': 'Recommendations are generated daily at 3:00 AM UTC'
+      }];
+      const wsMetadata = XLSX.utils.json_to_sheet(metadataData);
+      XLSX.utils.book_append_sheet(wb, wsMetadata, 'Export Metadata');
+
+      // Add sheet for campaigns needing both adjustments
+      const campaignsWithBoth = keywordData.filter((k: any) => k['Has Placement Recs'] === 'YES');
+      if (campaignsWithBoth.length > 0) {
+        const wsBoth = XLSX.utils.json_to_sheet(campaignsWithBoth);
+        XLSX.utils.book_append_sheet(wb, wsBoth, 'Needs Both Adjustments');
+      }
+
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="combined-recommendations-${country}-${new Date().toISOString().split('T')[0]}.xlsx"`);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error('Combined export error:', error);
       res.status(500).json({ error: error.message });
     }
   });
