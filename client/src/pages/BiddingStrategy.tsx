@@ -7,7 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowDown, ArrowUp, Check, Download, ChevronRight, TrendingDown, TrendingUp, Target, Info, Clock, Zap, AlertTriangle } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Download, ChevronRight, TrendingDown, TrendingUp, Target, Info, Clock, Zap, AlertTriangle, Settings } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
@@ -107,6 +109,13 @@ const formatCurrency = (value: number, country: string): string => {
 export default function BiddingStrategy() {
   const [selectedCountry, setSelectedCountry] = useState("DE");
   const [implementDialog, setImplementDialog] = useState<BiddingRecommendation | null>(null);
+  const [weightSettingsOpen, setWeightSettingsOpen] = useState(false);
+  const [editWeights, setEditWeights] = useState({
+    t0: 35,
+    d30: 25,
+    d365: 25,
+    lifetime: 15,
+  });
   const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery<BiddingStrategyResponse>({
@@ -148,6 +157,29 @@ export default function BiddingStrategy() {
       setImplementDialog(null);
     },
   });
+
+  const updateWeightsMutation = useMutation({
+    mutationFn: async (weights: { t0: number; d30: number; d365: number; lifetime: number }) => {
+      return apiRequest("POST", `/api/weights/${selectedCountry}`, {
+        t0_weight: weights.t0 / 100,
+        d30_weight: weights.d30 / 100,
+        d365_weight: weights.d365 / 100,
+        lifetime_weight: weights.lifetime / 100,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bidding-strategy"] });
+      setWeightSettingsOpen(false);
+    },
+  });
+
+  const handleWeightChange = (key: keyof typeof editWeights, value: string) => {
+    const numValue = parseInt(value) || 0;
+    setEditWeights(prev => ({ ...prev, [key]: Math.max(0, Math.min(100, numValue)) }));
+  };
+
+  const totalWeight = editWeights.t0 + editWeights.d30 + editWeights.d365 + editWeights.lifetime;
+  const weightsValid = totalWeight === 100;
 
   const exportToExcel = () => {
     if (!data?.recommendations) return;
@@ -248,9 +280,101 @@ export default function BiddingStrategy() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-medium">Weight Configuration</CardTitle>
-                <Badge variant="outline" className="font-mono text-xs">
-                  {countryInfo?.code || "Global"} Weights
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="font-mono text-xs">
+                    {countryInfo?.code || "Global"} Weights
+                  </Badge>
+                  <Dialog open={weightSettingsOpen} onOpenChange={(open) => {
+                    setWeightSettingsOpen(open);
+                    if (open && data?.weights) {
+                      setEditWeights({
+                        t0: Math.round(data.weights.t0_weight * 100),
+                        d30: Math.round(data.weights.d30_weight * 100),
+                        d365: Math.round(data.weights.d365_weight * 100),
+                        lifetime: Math.round(data.weights.lifetime_weight * 100),
+                      });
+                    }
+                  }}>
+                    <DialogTrigger asChild>
+                      <Button size="icon" variant="ghost" data-testid="button-weight-settings">
+                        <Settings className="h-4 w-4" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Configure Weights for {countryInfo?.name || selectedCountry}</DialogTitle>
+                        <DialogDescription>
+                          Adjust how much each time period contributes to the weighted ACOS calculation. Weights must sum to 100%.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="t0-weight">T0 (Since Last Change) %</Label>
+                            <Input 
+                              id="t0-weight" 
+                              type="number" 
+                              min="0" 
+                              max="100" 
+                              value={editWeights.t0}
+                              onChange={(e) => handleWeightChange("t0", e.target.value)}
+                              data-testid="input-weight-t0"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="d30-weight">30 Days %</Label>
+                            <Input 
+                              id="d30-weight" 
+                              type="number" 
+                              min="0" 
+                              max="100" 
+                              value={editWeights.d30}
+                              onChange={(e) => handleWeightChange("d30", e.target.value)}
+                              data-testid="input-weight-d30"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="d365-weight">365 Days %</Label>
+                            <Input 
+                              id="d365-weight" 
+                              type="number" 
+                              min="0" 
+                              max="100" 
+                              value={editWeights.d365}
+                              onChange={(e) => handleWeightChange("d365", e.target.value)}
+                              data-testid="input-weight-d365"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="lifetime-weight">Lifetime %</Label>
+                            <Input 
+                              id="lifetime-weight" 
+                              type="number" 
+                              min="0" 
+                              max="100" 
+                              value={editWeights.lifetime}
+                              onChange={(e) => handleWeightChange("lifetime", e.target.value)}
+                              data-testid="input-weight-lifetime"
+                            />
+                          </div>
+                        </div>
+                        <div className={`text-center p-3 rounded-lg ${weightsValid ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+                          Total: {totalWeight}% {weightsValid ? "✓" : "(must equal 100%)"}
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setWeightSettingsOpen(false)}>Cancel</Button>
+                        <Button 
+                          onClick={() => updateWeightsMutation.mutate(editWeights)}
+                          disabled={!weightsValid || updateWeightsMutation.isPending}
+                          data-testid="button-save-weights"
+                        >
+                          {updateWeightsMutation.isPending ? "Saving..." : "Save Weights"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
