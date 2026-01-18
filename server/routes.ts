@@ -13,6 +13,15 @@ import { getCached, setCache, generateCacheKey } from "./cache";
 import { queryAgent, queryAgentStream } from "./agent";
 import { createBidChangeHistoryTable } from "./migrations/bidChangeHistory";
 import { createAcosTargetsTable, importAcosTargetsFromCSV, getAcosTargetForCampaign } from "./migrations/acosTargets";
+import { 
+  createWeightConfigTable, 
+  createRecommendationHistoryTable, 
+  getWeightsForCountry, 
+  updateWeightsForCountry,
+  saveRecommendation,
+  markRecommendationImplemented,
+  getRecommendationHistory
+} from "./migrations/biddingStrategy";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
@@ -2100,6 +2109,405 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('ACOS target query error:', error);
       res.status(500).json({ error: error.message || 'Failed to fetch ACOS target' });
+    }
+  });
+
+  // ========== BIDDING STRATEGY ENDPOINTS ==========
+  
+  // Create bidding strategy tables migration
+  app.post("/api/migrations/bidding-strategy", async (req, res) => {
+    try {
+      await createWeightConfigTable();
+      await createRecommendationHistoryTable();
+      res.json({ success: true, message: 'Bidding strategy tables created successfully' });
+    } catch (error: any) {
+      console.error('Migration error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Get weights for a country (or global default)
+  app.get("/api/weights/:country?", async (req, res) => {
+    try {
+      const country = req.params.country || 'ALL';
+      const weights = await getWeightsForCountry(country);
+      res.json({ country, ...weights });
+    } catch (error: any) {
+      console.error('Error fetching weights:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Update weights for a country
+  app.post("/api/weights/:country", async (req, res) => {
+    try {
+      const { country } = req.params;
+      const { t0_weight, d30_weight, d365_weight, lifetime_weight } = req.body;
+      
+      // Validate weights sum to approximately 1
+      const total = t0_weight + d30_weight + d365_weight + lifetime_weight;
+      if (Math.abs(total - 1) > 0.01) {
+        return res.status(400).json({ error: 'Weights must sum to 1.0', received: total });
+      }
+      
+      await updateWeightsForCountry(country, { t0_weight, d30_weight, d365_weight, lifetime_weight });
+      res.json({ success: true, country, t0_weight, d30_weight, d365_weight, lifetime_weight });
+    } catch (error: any) {
+      console.error('Error updating weights:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get all country weights
+  app.get("/api/weights", async (req, res) => {
+    try {
+      const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+      const sqlClient = postgres(connectionUrl);
+      const result = await sqlClient`SELECT * FROM "weight_config" ORDER BY country`;
+      await sqlClient.end();
+      res.json(result);
+    } catch (error: any) {
+      console.error('Error fetching all weights:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Main bidding strategy endpoint - analyze and generate recommendations
+  app.get("/api/bidding-strategy", async (req, res) => {
+    try {
+      const { country, campaignId } = req.query;
+      
+      if (!country) {
+        return res.status(400).json({ error: 'Country parameter is required' });
+      }
+
+      const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+      const sqlClient = postgres(connectionUrl);
+
+      // Get weights for this country
+      const weights = await getWeightsForCountry(country as string);
+      
+      // Get campaign-specific ACOS targets
+      const acosTargetsResult = await sqlClient`
+        SELECT campaign_id, acos_target, campaign_name 
+        FROM "ACOS_Target_Campaign" 
+        WHERE country = ${country as string}
+      `;
+      const acosTargetsMap = new Map(acosTargetsResult.map((r: any) => [r.campaign_id, { target: Number(r.acos_target), name: r.campaign_name }]));
+
+      // Get last bid change dates for each keyword
+      const bidChangeResult = await sqlClient`
+        SELECT targeting, campaign_id, ad_group_id, MAX(date_adjusted) as last_change_date
+        FROM "bid_change_history"
+        WHERE country = ${country as string}
+        ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}` : sqlClient``}
+        GROUP BY targeting, campaign_id, ad_group_id
+      `;
+      const lastChangeMap = new Map(bidChangeResult.map((r: any) => [`${r.campaign_id}-${r.targeting}`, r.last_change_date]));
+
+      // Calculate date ranges
+      const today = new Date();
+      const d30Ago = new Date(today);
+      d30Ago.setDate(d30Ago.getDate() - 30);
+      const d365Ago = new Date(today);
+      d365Ago.setDate(d365Ago.getDate() - 365);
+      const lifetimeStart = '2024-10-01';
+      const d30AgoStr = d30Ago.toISOString().split('T')[0];
+      const d365AgoStr = d365Ago.toISOString().split('T')[0];
+
+      // Fetch keyword performance data with all time windows INCLUDING T0
+      // T0 = data since last bid change (or lifetime if no change)
+      const keywordData = await sqlClient`
+        WITH last_changes AS (
+          SELECT 
+            targeting,
+            campaign_id,
+            ad_group_id,
+            MAX(date_adjusted) as last_change_date
+          FROM "bid_change_history"
+          WHERE country = ${country as string}
+          ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}` : sqlClient``}
+          GROUP BY targeting, campaign_id, ad_group_id
+        ),
+        keyword_base AS (
+          SELECT 
+            s."campaignId" as campaign_id,
+            s."campaignName" as campaign_name,
+            s."adGroupId" as ad_group_id,
+            s."adGroupName" as ad_group_name,
+            s.keyword as targeting,
+            s."matchType" as match_type,
+            CAST(s."keywordBid" AS NUMERIC) as keyword_bid,
+            s.date::text as date,
+            COALESCE(s.clicks, 0) as clicks,
+            COALESCE(s.cost, 0) as cost,
+            COALESCE(CAST(s."sales30d" AS NUMERIC), 0) as sales,
+            COALESCE(CAST(s."purchases30d" AS NUMERIC), 0) as orders,
+            lc.last_change_date::text as last_change_date
+          FROM "s_products_search_terms" s
+          LEFT JOIN last_changes lc 
+            ON s."campaignId"::text = lc.campaign_id::text 
+            AND s.keyword = lc.targeting 
+            AND s."adGroupId"::text = lc.ad_group_id::text
+          WHERE s.country = ${country as string}
+          ${campaignId ? sqlClient`AND s."campaignId" = ${campaignId as string}` : sqlClient``}
+        )
+        SELECT 
+          campaign_id,
+          campaign_name,
+          ad_group_id,
+          ad_group_name,
+          targeting,
+          match_type,
+          MAX(keyword_bid) as current_bid,
+          MAX(last_change_date) as last_change_date,
+          
+          -- Lifetime metrics
+          SUM(clicks) as lifetime_clicks,
+          SUM(cost) as lifetime_cost,
+          SUM(sales) as lifetime_sales,
+          SUM(orders) as lifetime_orders,
+          
+          -- 365D metrics
+          SUM(CASE WHEN date >= ${d365AgoStr} THEN clicks ELSE 0 END) as d365_clicks,
+          SUM(CASE WHEN date >= ${d365AgoStr} THEN cost ELSE 0 END) as d365_cost,
+          SUM(CASE WHEN date >= ${d365AgoStr} THEN sales ELSE 0 END) as d365_sales,
+          
+          -- 30D metrics
+          SUM(CASE WHEN date >= ${d30AgoStr} THEN clicks ELSE 0 END) as d30_clicks,
+          SUM(CASE WHEN date >= ${d30AgoStr} THEN cost ELSE 0 END) as d30_cost,
+          SUM(CASE WHEN date >= ${d30AgoStr} THEN sales ELSE 0 END) as d30_sales,
+          
+          -- T0 metrics (since last change, or all data if no change)
+          SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN clicks ELSE 0 END) as t0_clicks,
+          SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN cost ELSE 0 END) as t0_cost,
+          SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN sales ELSE 0 END) as t0_sales,
+          
+          MIN(date) as first_date,
+          MAX(date) as last_date
+        FROM keyword_base
+        GROUP BY campaign_id, campaign_name, ad_group_id, ad_group_name, targeting, match_type
+        HAVING SUM(clicks) >= 30
+        ORDER BY SUM(cost) DESC
+        LIMIT 500
+      `;
+
+      const recommendations: any[] = [];
+      const combinedActions: any[] = [];
+
+      for (const kw of keywordData) {
+        const campaignTarget = acosTargetsMap.get(kw.campaign_id);
+        if (!campaignTarget) continue; // Skip campaigns without ACOS target
+
+        const targetAcos = campaignTarget.target;
+        const acosWindow = 0.03; // ±3%
+
+        // T0 metrics are now pre-calculated in the SQL query
+        const t0Clicks = Number(kw.t0_clicks);
+        const t0Cost = Number(kw.t0_cost);
+        const t0Sales = Number(kw.t0_sales);
+        const lastChangeDate = kw.last_change_date;
+
+        // Calculate ACOS for each period
+        const t0Acos = t0Sales > 0 ? t0Cost / t0Sales : (t0Clicks >= 30 ? 999 : null);
+        const d30Acos = Number(kw.d30_sales) > 0 ? Number(kw.d30_cost) / Number(kw.d30_sales) : (Number(kw.d30_clicks) >= 30 ? 999 : null);
+        const d365Acos = Number(kw.d365_sales) > 0 ? Number(kw.d365_cost) / Number(kw.d365_sales) : (Number(kw.d365_clicks) >= 30 ? 999 : null);
+        const lifetimeAcos = Number(kw.lifetime_sales) > 0 ? Number(kw.lifetime_cost) / Number(kw.lifetime_sales) : (Number(kw.lifetime_clicks) >= 30 ? 999 : null);
+
+        // Check cooldown (14 days for keyword bids)
+        const daysSinceChange = lastChangeDate 
+          ? Math.floor((today.getTime() - new Date(lastChangeDate).getTime()) / (1000 * 60 * 60 * 24))
+          : 999;
+        
+        if (daysSinceChange < 14) continue; // Skip if within cooldown
+
+        // Calculate weighted ACOS
+        let weightedAcos = 0;
+        let totalWeight = 0;
+        
+        if (t0Acos !== null && t0Acos !== 999) {
+          weightedAcos += t0Acos * weights.t0_weight;
+          totalWeight += weights.t0_weight;
+        }
+        if (d30Acos !== null && d30Acos !== 999) {
+          weightedAcos += d30Acos * weights.d30_weight;
+          totalWeight += weights.d30_weight;
+        }
+        if (d365Acos !== null && d365Acos !== 999) {
+          weightedAcos += d365Acos * weights.d365_weight;
+          totalWeight += weights.d365_weight;
+        }
+        if (lifetimeAcos !== null && lifetimeAcos !== 999) {
+          weightedAcos += lifetimeAcos * weights.lifetime_weight;
+          totalWeight += weights.lifetime_weight;
+        }
+
+        if (totalWeight === 0) continue;
+        weightedAcos = weightedAcos / totalWeight;
+
+        // Check if outside ±3% window
+        const lowerBound = targetAcos - acosWindow;
+        const upperBound = targetAcos + acosWindow;
+        
+        if (weightedAcos >= lowerBound && weightedAcos <= upperBound) continue; // Within window, no action
+
+        // Calculate recommended bid change
+        const currentBid = Number(kw.current_bid) || 0;
+        if (currentBid <= 0) continue;
+
+        // Bid adjustment formula: new_bid = current_bid * (target_acos / weighted_acos)
+        let bidMultiplier = targetAcos / weightedAcos;
+        bidMultiplier = Math.max(0.5, Math.min(1.5, bidMultiplier)); // Cap at ±50%
+        const recommendedBid = Math.round(currentBid * bidMultiplier * 100) / 100;
+
+        // Determine confidence based on click volume
+        const totalClicks = Number(kw.lifetime_clicks);
+        let confidence = 'Low';
+        if (totalClicks >= 200) confidence = 'Extreme';
+        else if (totalClicks >= 100) confidence = 'High';
+        else if (totalClicks >= 50) confidence = 'Good';
+        else if (totalClicks >= 30) confidence = 'OK';
+
+        const action = weightedAcos > targetAcos ? 'decrease' : 'increase';
+        const changePercent = Math.round((bidMultiplier - 1) * 100);
+
+        recommendations.push({
+          type: 'keyword_bid',
+          country: country,
+          campaign_id: kw.campaign_id,
+          campaign_name: kw.campaign_name,
+          ad_group_id: kw.ad_group_id,
+          ad_group_name: kw.ad_group_name,
+          targeting: kw.targeting,
+          match_type: kw.match_type,
+          current_bid: currentBid,
+          recommended_bid: recommendedBid,
+          change_percent: changePercent,
+          action: action,
+          acos_target: targetAcos,
+          acos_target_percent: Math.round(targetAcos * 100),
+          weighted_acos: weightedAcos,
+          weighted_acos_percent: Math.round(weightedAcos * 100),
+          t0_acos: t0Acos !== 999 ? t0Acos : null,
+          t0_clicks: t0Clicks,
+          d30_acos: d30Acos !== 999 ? d30Acos : null,
+          d30_clicks: Number(kw.d30_clicks),
+          d365_acos: d365Acos !== 999 ? d365Acos : null,
+          d365_clicks: Number(kw.d365_clicks),
+          lifetime_acos: lifetimeAcos !== 999 ? lifetimeAcos : null,
+          lifetime_clicks: totalClicks,
+          confidence: confidence,
+          days_since_change: daysSinceChange,
+          last_change_date: lastChangeDate || null,
+          reason: `Weighted ACOS (${Math.round(weightedAcos * 100)}%) is ${action === 'decrease' ? 'above' : 'below'} target (${Math.round(targetAcos * 100)}%)`
+        });
+      }
+
+      await sqlClient.end();
+
+      res.json({
+        country,
+        weights,
+        total_recommendations: recommendations.length,
+        recommendations: recommendations.slice(0, 100), // Limit response size
+        combined_actions: combinedActions
+      });
+    } catch (error: any) {
+      console.error('Bidding strategy error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Mark recommendation as implemented
+  app.post("/api/recommendation/:id/implement", async (req, res) => {
+    try {
+      const { id } = req.params;
+      await markRecommendationImplemented(parseInt(id));
+      res.json({ success: true, id });
+    } catch (error: any) {
+      console.error('Error marking implemented:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Save a new recommendation
+  app.post("/api/recommendations/save", async (req, res) => {
+    try {
+      const recId = await saveRecommendation(req.body);
+      res.json({ success: true, id: recId });
+    } catch (error: any) {
+      console.error('Error saving recommendation:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get recommendation history
+  app.get("/api/recommendation-history", async (req, res) => {
+    try {
+      const { country, campaign_id, implemented_only, limit } = req.query;
+      const history = await getRecommendationHistory({
+        country: country as string,
+        campaign_id: campaign_id as string,
+        implemented_only: implemented_only === 'true',
+        limit: limit ? parseInt(limit as string) : 100
+      });
+      res.json(history);
+    } catch (error: any) {
+      console.error('Error fetching history:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Export recommendations to Excel
+  app.get("/api/exports/bidding-strategy.xlsx", async (req, res) => {
+    try {
+      const { country } = req.query;
+      
+      if (!country) {
+        return res.status(400).json({ error: 'Country parameter is required' });
+      }
+
+      // Fetch recommendations using the same logic
+      const strategyResponse = await fetch(`http://localhost:5000/api/bidding-strategy?country=${country}`);
+      const strategyData = await strategyResponse.json();
+
+      const exportData = strategyData.recommendations.map((rec: any) => ({
+        'Country': rec.country,
+        'Campaign Name': rec.campaign_name,
+        'Ad Group Name': rec.ad_group_name,
+        'Targeting': rec.targeting,
+        'Match Type': rec.match_type,
+        'Current Bid': rec.current_bid,
+        'Recommended Bid': rec.recommended_bid,
+        'Change %': `${rec.change_percent}%`,
+        'Action': rec.action,
+        'ACOS Target': `${rec.acos_target_percent}%`,
+        'Weighted ACOS': `${rec.weighted_acos_percent}%`,
+        'T0 ACOS': rec.t0_acos ? `${Math.round(rec.t0_acos * 100)}%` : 'N/A',
+        'T0 Clicks': rec.t0_clicks,
+        '30D ACOS': rec.d30_acos ? `${Math.round(rec.d30_acos * 100)}%` : 'N/A',
+        '30D Clicks': rec.d30_clicks,
+        '365D ACOS': rec.d365_acos ? `${Math.round(rec.d365_acos * 100)}%` : 'N/A',
+        '365D Clicks': rec.d365_clicks,
+        'Lifetime ACOS': rec.lifetime_acos ? `${Math.round(rec.lifetime_acos * 100)}%` : 'N/A',
+        'Lifetime Clicks': rec.lifetime_clicks,
+        'Confidence': rec.confidence,
+        'Days Since Change': rec.days_since_change,
+        'Reason': rec.reason
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Recommendations');
+
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="bidding-strategy-${country}-${new Date().toISOString().split('T')[0]}.xlsx"`);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error('Export error:', error);
+      res.status(500).json({ error: error.message });
     }
   });
 
