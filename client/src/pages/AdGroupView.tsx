@@ -23,8 +23,8 @@ export default function AdGroupView() {
   const [, params] = useRoute("/ad-group/:id");
   const adGroupId = params?.id || "";
   
-  // Extract country and campaignType from query parameters
-  const { country: countryCode, campaignType } = useSearchParams();
+  // Extract country, campaignType, and campaignId from query parameters
+  const { country: countryCode, campaignType, campaignId } = useSearchParams();
   
   const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
   const [showRecommendations, setShowRecommendations] = useState(false);
@@ -55,7 +55,7 @@ export default function AdGroupView() {
   });
 
   const { data: searchTerms, isLoading: searchTermsLoading, error: searchTermsError } = useQuery({
-    queryKey: ['/api/search-terms', adGroupId, campaignType, countryCode, dateRange],
+    queryKey: ['/api/search-terms', adGroupId, campaignId, campaignType, countryCode, dateRange],
     queryFn: async () => {
       const params = new URLSearchParams({ 
         adGroupId,
@@ -63,6 +63,10 @@ export default function AdGroupView() {
         from: dateRange.from, 
         to: dateRange.to 
       });
+      // Pass campaignId for campaign-specific ACOS target lookup
+      if (campaignId) {
+        params.append('campaignId', campaignId);
+      }
       // When country is present, display in local currency
       if (countryCode) {
         params.append('country', countryCode);
@@ -70,7 +74,7 @@ export default function AdGroupView() {
       }
       const response = await fetch(`/api/search-terms?${params}`);
       
-      // If error (e.g., multi-currency issue), retry with EUR conversion
+      // If error (e.g., multi-currency issue or missing ACOS target), handle appropriately
       if (!response.ok) {
         const errorData = await response.json();
         if (errorData.error?.includes('multiple currencies')) {
@@ -82,13 +86,16 @@ export default function AdGroupView() {
             to: dateRange.to,
             convertToEur: 'true'
           });
+          if (campaignId) {
+            retryParams.append('campaignId', campaignId);
+          }
           const retryResponse = await fetch(`/api/search-terms?${retryParams}`);
           if (!retryResponse.ok) {
             throw new Error('Failed to fetch search terms');
           }
           return retryResponse.json();
         }
-        throw new Error(errorData.error || 'Failed to fetch search terms');
+        throw new Error(errorData.message || errorData.error || 'Failed to fetch search terms');
       }
       
       return response.json();
@@ -104,19 +111,30 @@ export default function AdGroupView() {
         body: JSON.stringify({
           scope: 'ad_group',
           scopeId: adGroupId,
+          campaignId: campaignId || undefined,
           campaignType,
           from: dateRange.from,
           to: dateRange.to,
-          targetAcos: 20,
         }),
         headers: { 'Content-Type': 'application/json' },
       });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || errorData.error || 'Failed to generate recommendations');
+      }
       return response.json();
     },
     onSuccess: () => {
       setShowRecommendations(true);
       queryClient.invalidateQueries({ queryKey: ['/api/recommendations', adGroupId] });
       toast({ title: "Recommendations generated successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ 
+        title: "Failed to generate recommendations",
+        description: error.message,
+        variant: "destructive"
+      });
     },
   });
 

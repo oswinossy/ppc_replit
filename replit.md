@@ -1,7 +1,7 @@
 # Elan - Amazon PPC Analytics Portal
 
 ## Overview
-Elan is an internal analytics portal designed to centralize and analyze Amazon PPC campaign data (Sponsored Products, Sponsored Brands, Display). Its primary purpose is to provide multi-level drilldown capabilities, KPI tracking, and bid recommendations targeting a 20% ACOS to optimize campaign performance and drive sales growth. The system supports multi-currency display with EUR conversion and offers tools for negative keyword detection and export.
+Elan is an internal analytics portal designed to centralize and analyze Amazon PPC campaign data (Sponsored Products, Sponsored Brands, Display). Its primary purpose is to provide multi-level drilldown capabilities, KPI tracking, and bid recommendations using campaign-specific ACOS targets to optimize campaign performance and drive sales growth. The system supports multi-currency display with EUR conversion and offers tools for negative keyword detection and export.
 
 ## User Preferences
 - Prefer data-first over decorative UI
@@ -38,7 +38,7 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders.
     - **Attribution Window**: Sponsored Products uses 30-day attribution (sales30d, purchases30d) to match Amazon's default dashboard view.
     - **Performance Charts**: Weekly aggregated ACOS and sales trends.
-    - **Bid Recommendations**: 20% ACOS targeting for all targeting keywords/ASINs with confidence levels. Aggregates by targeting (the keyword/ASIN you bid on) instead of search term (what customers search for), aligning with Amazon's Advertising Console.
+    - **Bid Recommendations**: Campaign-specific ACOS targets for all targeting keywords/ASINs with confidence levels. Aggregates by targeting (the keyword/ASIN you bid on) instead of search term (what customers search for), aligning with Amazon's Advertising Console.
     - **Negative Keywords**: Auto-detection (≥20 clicks, $0 sales) with Excel export.
     - **Date Range Filtering**: Preset periods (14D, 30D, 60D, 365D, Lifetime from Oct 1 2024) and custom date picker with auto-refresh.
 
@@ -114,6 +114,30 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
     - `POST /api/detect-bid-changes`: Run daily to detect bid changes from new data
     - `GET /api/bid-history`: Query bid change history with filters (targeting, campaignId, dateRange)
     - `GET /api/bid-history/last-change`: Get the most recent bid change for a specific targeting keyword
+
+### Campaign-Specific ACOS Targets (Jan 2026)
+- **Purpose**: Replaces hardcoded 20% ACOS target with per-campaign targets for accurate bid recommendations
+- **Table**: `ACOS_Target_Campaign` in Supabase
+    - `campaign_id` (TEXT, PRIMARY KEY): Amazon campaign ID
+    - `country` (TEXT): Country code (DE, US, etc.)
+    - `campaign_name` (TEXT): Campaign display name
+    - `acos_target` (NUMERIC): Target as decimal (0.35 = 35%)
+    - `created_at` (TIMESTAMP): Import timestamp
+- **Data Import**: CSV import via `POST /api/import-acos-targets` endpoint
+    - Parses percentage strings (35%) to decimals (0.35)
+    - Skips rows with empty campaign_id
+    - Uses UPSERT for idempotent imports
+- **API Endpoints**:
+    - `GET /api/acos-targets/:campaignId`: Fetch target for specific campaign (returns 404 if not found)
+    - `POST /api/migrations/acos-targets`: Create the table
+    - `POST /api/import-acos-targets`: Import from attached CSV
+- **Integration Points**:
+    - `/api/campaign-placements`: Requires campaignId, fetches target from table, returns 400 if missing
+    - `/api/search-terms`: Accepts optional campaignId, uses campaign target if provided
+    - `/api/recommendations/generate`: Accepts campaignId, uses campaign target for bid calculations
+- **Frontend Propagation**: `campaignId` passed through query params from Campaign View → Ad Group View
+- **Error Handling**: All endpoints return 400 error with actionable message if campaign lacks ACOS target
+- **Calculation Formula**: `targetBidAdjustment = currentBidAdjustment + (targetAcos / actualAcos - 1) * 100`, capped 0-900%
 
 ### AI Analytics Agent
 - **Model**: Anthropic Claude Opus 4.5 (claude-opus-4-20250514) via @anthropic-ai/sdk

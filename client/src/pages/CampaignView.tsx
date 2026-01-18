@@ -257,8 +257,8 @@ export default function CampaignView() {
                 data={adGroups}
                 onRowClick={(row) => {
                   const url = countryCode 
-                    ? `/ad-group/${row.id}?country=${countryCode}&campaignType=${campaignType}`
-                    : `/ad-group/${row.id}?campaignType=${campaignType}`;
+                    ? `/ad-group/${row.id}?country=${countryCode}&campaignType=${campaignType}&campaignId=${campaignId}`
+                    : `/ad-group/${row.id}?campaignType=${campaignType}&campaignId=${campaignId}`;
                   setLocation(url);
                 }}
               />

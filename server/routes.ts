@@ -501,8 +501,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // This aligns with Amazon's Advertising Console where you set bids at the targeting level
   app.get("/api/search-terms", async (req, res) => {
     try {
-      const { adGroupId, campaignType = 'products', from, to, convertToEur: convertToEurParam = 'true' } = req.query;
+      const { adGroupId, campaignId, campaignType = 'products', from, to, convertToEur: convertToEurParam = 'true' } = req.query;
       const convertToEur = convertToEurParam === 'true';
+      
+      // Fetch campaign-specific ACOS target from database if campaignId is provided
+      let targetAcos = 20; // Default fallback for backwards compatibility
+      if (campaignId) {
+        const acosTarget = await getAcosTargetForCampaign(campaignId as string);
+        if (acosTarget === null) {
+          return res.status(400).json({ 
+            error: 'ACOS target not configured',
+            message: `No ACOS target found for campaign ${campaignId}. Please add it to the ACOS_Target_Campaign table.`,
+            campaignId
+          });
+        }
+        targetAcos = acosTarget * 100; // Convert from decimal (0.35) to percentage (35)
+      }
       
       let results: Array<{
         targeting: string | null;
@@ -594,9 +608,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const acos = calculateACOS(row.cost, row.sales);
           const cpc = calculateCPC(row.cost, row.clicks);
           const cvr = Number(row.clicks) > 0 ? (Number(row.orders) / Number(row.clicks)) * 100 : 0;
-          const targetAcos = 20;
-          const lowerBound = targetAcos * 0.8; // 16%
-          const upperBound = targetAcos * 1.1; // 22%
+          // Use campaign-specific ACOS target (fetched at endpoint level)
+          const lowerBound = targetAcos * 0.8;
+          const upperBound = targetAcos * 1.1;
           const maxChangePercent = 25; // Cap at ±25% per adjustment
           
           const baseBid = row.keywordBid || cpc || 1.0;
@@ -774,7 +788,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/campaign-placements", async (req, res) => {
     try {
       const { campaignId, from, to } = req.query;
-      const targetAcos = 20; // 20% target ACOS
+      
+      if (!campaignId) {
+        return res.status(400).json({ error: 'Campaign ID is required' });
+      }
+      
+      // Fetch campaign-specific ACOS target from database
+      const acosTarget = await getAcosTargetForCampaign(campaignId as string);
+      if (acosTarget === null) {
+        return res.status(400).json({ 
+          error: 'ACOS target not configured',
+          message: `No ACOS target found for campaign ${campaignId}. Please add it to the ACOS_Target_Campaign table.`,
+          campaignId
+        });
+      }
+      
+      const targetAcos = acosTarget * 100; // Convert from decimal (0.35) to percentage (35)
       
       // Query ALL placement data for the campaign in one go (not aggregated yet)
       const conditions: any[] = [];
@@ -1620,10 +1649,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Generate bid recommendations endpoint
   app.post("/api/recommendations/generate", async (req, res) => {
     try {
-      const { scope, scopeId, from, to, targetAcos = 20 } = req.body;
+      const { scope, scopeId, campaignId, from, to, targetAcos: providedTargetAcos } = req.body;
 
       if (!scopeId) {
         return res.status(400).json({ error: 'Missing required parameters' });
+      }
+      
+      // Fetch campaign-specific ACOS target if campaignId provided
+      let targetAcos = 20; // Default fallback
+      if (campaignId) {
+        const acosTarget = await getAcosTargetForCampaign(campaignId);
+        if (acosTarget === null) {
+          return res.status(400).json({ 
+            error: 'ACOS target not configured',
+            message: `No ACOS target found for campaign ${campaignId}. Please add it to the ACOS_Target_Campaign table.`,
+            campaignId
+          });
+        }
+        targetAcos = acosTarget * 100; // Convert from decimal (0.35) to percentage (35)
+      } else if (providedTargetAcos !== undefined) {
+        targetAcos = providedTargetAcos;
       }
 
       // Fetch search terms data for the scope (ad group)
