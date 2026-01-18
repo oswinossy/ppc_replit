@@ -1802,15 +1802,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             rationale = `ACOS ${acos.toFixed(1)}% well below target ${targetAcos}%. Increasing bid to capture more profitable volume. Confidence: ${confidence.label}`;
           }
           // 3) Standard formula: current bid / current ACOS * target ACOS = new bid
+          // Only apply if ACOS is outside the acceptable window (±10% of target)
           else if (term.sales > 0 && acos > 0) {
+            const lowerBound = targetAcos * 0.9;  // 10% below target
+            const upperBound = targetAcos * 1.1;  // 10% above target
+            
+            // Skip if ACOS is within acceptable range (near target)
+            if (acos >= lowerBound && acos <= upperBound) {
+              return null; // ACOS is close enough to target, no action needed
+            }
+            
             proposedBid = baseBid * (targetAcos / acos);
             
-            if (acos > targetAcos * 1.1) {
+            if (acos > upperBound) {
               rationale = `ACOS ${acos.toFixed(1)}% exceeds target ${targetAcos}%. Applying formula: ${baseBid.toFixed(2)} × (${targetAcos} / ${acos.toFixed(1)}) = ${proposedBid.toFixed(2)}. CVR: ${cvr.toFixed(1)}%`;
-            } else if (acos < targetAcos * 0.9) {
+            } else if (acos < lowerBound) {
               rationale = `ACOS ${acos.toFixed(1)}% below target ${targetAcos}%. Optimizing bid for growth. CVR: ${cvr.toFixed(1)}%`;
-            } else {
-              rationale = `ACOS ${acos.toFixed(1)}% near target ${targetAcos}%. Fine-tuning bid. CVR: ${cvr.toFixed(1)}%`;
             }
           } else {
             return null;
