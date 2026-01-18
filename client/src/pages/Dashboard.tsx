@@ -10,7 +10,8 @@ import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, TrendingUp, Globe } from "lucide-react";
+import { Download, TrendingUp, Globe, Target } from "lucide-react";
+import { Link } from "wouter";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -193,6 +194,17 @@ export default function Dashboard() {
             <BreadcrumbNav items={[{ label: "Dashboard" }]} />
           </div>
           <div className="flex items-center gap-4">
+            <Link href="/bidding-strategy">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-2" 
+                data-testid="button-bidding-strategy"
+              >
+                <Target className="h-4 w-4" />
+                Bidding Strategy
+              </Button>
+            </Link>
             <Button 
               variant="outline" 
               size="sm" 

@@ -7,6 +7,7 @@ import Dashboard from "@/pages/Dashboard";
 import CountryView from "@/pages/CountryView";
 import CampaignView from "@/pages/CampaignView";
 import AdGroupView from "@/pages/AdGroupView";
+import BiddingStrategy from "@/pages/BiddingStrategy";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -16,6 +17,7 @@ function Router() {
       <Route path="/country/:code" component={CountryView} />
       <Route path="/campaign/:id" component={CampaignView} />
       <Route path="/ad-group/:id" component={AdGroupView} />
+      <Route path="/bidding-strategy" component={BiddingStrategy} />
       <Route component={NotFound} />
     </Switch>
   );
