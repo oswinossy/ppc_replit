@@ -2594,8 +2594,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Country parameter is required' });
       }
 
-      // Fetch recommendations using the same logic
-      const strategyResponse = await fetch(`http://localhost:5000/api/bidding-strategy?country=${country}`);
+      // Fetch recommendations using the same logic (use request host to avoid hardcoded localhost)
+      const host = req.get('host') || 'localhost:5000';
+      const protocol = req.protocol || 'http';
+      const strategyResponse = await fetch(`${protocol}://${host}/api/bidding-strategy?country=${country}`);
       const strategyData = await strategyResponse.json();
 
       const exportData = strategyData.recommendations.map((rec: any) => ({
@@ -2620,12 +2622,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         'Lifetime Clicks': rec.lifetime_clicks,
         'Confidence': rec.confidence,
         'Days Since Change': rec.days_since_change,
-        'Reason': rec.reason
+        'Reason': rec.reason,
+        'Has Placement Recs': rec.hasPlacementRecs ? 'YES - NEEDS BOTH ADJUSTMENTS' : 'No'
       }));
 
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Recommendations');
+      XLSX.utils.book_append_sheet(wb, ws, 'Keyword Recommendations');
+
+      // Add conditional formatting note to highlight rows needing both adjustments
+      // Since xlsx library doesn't support conditional formatting directly,
+      // we add a "Combined Adjustments" sheet with only those records
+      const combinedRecs = exportData.filter((rec: any) => rec['Has Placement Recs'].startsWith('YES'));
+      if (combinedRecs.length > 0) {
+        const wsCombined = XLSX.utils.json_to_sheet(combinedRecs);
+        XLSX.utils.book_append_sheet(wb, wsCombined, 'Needs Both Adjustments');
+      }
 
       const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
@@ -2634,6 +2646,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(buffer);
     } catch (error: any) {
       console.error('Export error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Export campaign placements to Excel
+  app.get("/api/exports/campaign-placements.xlsx", async (req, res) => {
+    try {
+      const { campaignId, country } = req.query;
+      
+      if (!campaignId) {
+        return res.status(400).json({ error: 'campaignId parameter is required' });
+      }
+
+      // Fetch placements using the same logic (use request host to avoid hardcoded localhost)
+      const host = req.get('host') || 'localhost:5000';
+      const protocol = req.protocol || 'http';
+      const placementsResponse = await fetch(`${protocol}://${host}/api/campaign-placements?campaignId=${campaignId}${country ? `&country=${country}` : ''}`);
+      const placementsData = await placementsResponse.json();
+
+      const placements = placementsData.placements || [];
+      const hasKeywordRecs = placementsData.hasKeywordRecs || false;
+      const keywordRecCount = placementsData.keywordRecCount || 0;
+
+      const exportData = placements.map((p: any) => ({
+        'Campaign ID': campaignId,
+        'Placement': p.placement,
+        'Bidding Strategy': p.biddingStrategy || 'N/A',
+        'Current Bid Adjustment': p.bidAdjustment !== null ? `${p.bidAdjustment}%` : 'Not set',
+        'Target Bid Adjustment': p.targetBidAdjustment !== null ? `${p.targetBidAdjustment}%` : 'N/A',
+        'Impressions': p.impressions,
+        'Clicks': p.clicks,
+        'CTR': p.ctr ? `${p.ctr.toFixed(2)}%` : 'N/A',
+        'Spend (EUR)': p.spend?.toFixed(2) || '0.00',
+        'Sales (EUR)': p.sales?.toFixed(2) || '0.00',
+        'ACOS': p.acos ? `${p.acos.toFixed(1)}%` : 'N/A',
+        'Orders': p.orders,
+        'CPC (EUR)': p.cpc?.toFixed(2) || '0.00',
+        'CVR': p.cvr ? `${p.cvr.toFixed(2)}%` : 'N/A',
+        'Has Keyword Recs': hasKeywordRecs ? `YES - ${keywordRecCount} keyword adjustments needed` : 'No'
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Placement Adjustments');
+
+      // Add summary sheet if this campaign needs keyword adjustments too
+      if (hasKeywordRecs) {
+        const summaryData = [{
+          'Notice': 'This campaign also has keyword bid recommendations',
+          'Keyword Adjustment Count': keywordRecCount,
+          'Recommendation': 'Review keyword bids on the Bidding Strategy page for comprehensive optimization'
+        }];
+        const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Cross-Reference Note');
+      }
+
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      const campaignName = placements[0]?.campaignName?.replace(/[^a-zA-Z0-9]/g, '_') || campaignId;
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="placements-${campaignName}-${new Date().toISOString().split('T')[0]}.xlsx"`);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error('Export placements error:', error);
       res.status(500).json({ error: error.message });
     }
   });

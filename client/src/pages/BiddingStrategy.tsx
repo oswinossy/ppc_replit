@@ -183,45 +183,14 @@ export default function BiddingStrategy() {
   const weightsValid = totalWeight === 100;
 
   const exportToExcel = () => {
-    if (!data?.recommendations) return;
+    if (!data?.recommendations?.length) return;
     
-    const headers = [
-      "Type", "Country", "Campaign", "Ad Group", "Targeting", "Match Type",
-      "Current Bid", "Recommended Bid", "Change %", "Action",
-      "Target ACOS", "Weighted ACOS", "T0 ACOS", "30D ACOS", "365D ACOS", "Lifetime ACOS",
-      "Confidence", "Days Since Change", "Reason"
-    ];
-    
-    const rows = data.recommendations.map(r => [
-      r.type,
-      r.country,
-      r.campaign_name,
-      r.ad_group_name || "",
-      r.targeting,
-      r.match_type || "",
-      r.current_bid?.toFixed(2) || "",
-      r.recommended_bid?.toFixed(2) || "",
-      r.change_percent,
-      r.action,
-      `${r.acos_target_percent}%`,
-      `${r.weighted_acos_percent}%`,
-      formatAcos(r.t0_acos),
-      formatAcos(r.d30_acos),
-      formatAcos(r.d365_acos),
-      formatAcos(r.lifetime_acos),
-      r.confidence,
-      r.days_since_change,
-      r.reason
-    ]);
-    
-    const csvContent = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
+    // Use the backend Excel export endpoint which includes cross-reference info
+    const url = `/api/exports/bidding-strategy.xlsx?country=${selectedCountry}`;
     const a = document.createElement("a");
     a.href = url;
-    a.download = `bidding-recommendations-${selectedCountry}-${new Date().toISOString().split("T")[0]}.csv`;
+    a.download = `bidding-strategy-${selectedCountry}-${new Date().toISOString().split("T")[0]}.xlsx`;
     a.click();
-    URL.revokeObjectURL(url);
   };
 
   const keywordRecs = useMemo(() => 

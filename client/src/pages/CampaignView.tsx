@@ -278,27 +278,44 @@ export default function CampaignView() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div>
                 <h2 className="text-xl font-semibold">Placements</h2>
                 <p className="text-sm text-muted-foreground">Campaign-level placement performance and bid adjustments</p>
               </div>
-              {placements?.hasKeywordRecs && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Link href={`/bidding-strategy?country=${countryCode || ''}`}>
-                      <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 cursor-pointer hover-elevate">
-                        <Target className="h-3 w-3 mr-1" />
-                        {placements.keywordRecCount} Keyword Adjustments
-                      </Badge>
-                    </Link>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>This campaign also has {placements.keywordRecCount} keyword bid recommendations.</p>
-                    <p className="text-muted-foreground text-xs mt-1">Click to view Bidding Strategy</p>
-                  </TooltipContent>
-                </Tooltip>
-              )}
+              <div className="flex items-center gap-2">
+                {placements?.hasKeywordRecs && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Link href={`/bidding-strategy?country=${countryCode || ''}`}>
+                        <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 cursor-pointer hover-elevate">
+                          <Target className="h-3 w-3 mr-1" />
+                          {placements.keywordRecCount} Keyword Adjustments
+                        </Badge>
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>This campaign also has {placements.keywordRecCount} keyword bid recommendations.</p>
+                      <p className="text-muted-foreground text-xs mt-1">Click to view Bidding Strategy</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => {
+                    const url = `/api/exports/campaign-placements.xlsx?campaignId=${campaignId}${countryCode ? `&country=${countryCode}` : ''}`;
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.click();
+                  }}
+                  disabled={!placements?.placements?.length}
+                  data-testid="button-export-placements"
+                >
+                  <Download className="h-4 w-4 mr-1" />
+                  Export
+                </Button>
+              </div>
             </div>
             {placementsLoading ? (
               <Skeleton className="h-64" />
