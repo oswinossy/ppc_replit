@@ -1,7 +1,7 @@
 # Elan - Amazon PPC Analytics Portal
 
 ## Overview
-Elan is an internal analytics portal designed to centralize and analyze Amazon PPC campaign data (Sponsored Products, Sponsored Brands, Display). Its primary purpose is to provide multi-level drilldown capabilities, KPI tracking, and bid recommendations using campaign-specific ACOS targets to optimize campaign performance and drive sales growth. The system supports multi-currency display with EUR conversion and offers tools for negative keyword detection and export.
+Elan is an internal analytics portal for Amazon PPC campaign data (Sponsored Products, Sponsored Brands, Display). It provides multi-level drilldown, KPI tracking, and bid recommendations using campaign-specific ACOS targets to optimize performance and increase sales. Key features include multi-currency display (with EUR conversion), negative keyword detection, and an AI analytics agent. The project aims to centralize data, provide actionable insights, and automate parts of the optimization process.
 
 ## User Preferences
 - Prefer data-first over decorative UI
@@ -11,153 +11,35 @@ Elan is an internal analytics portal designed to centralize and analyze Amazon P
 ## System Architecture
 
 ### UI/UX Decisions
-- Professional, data-focused aesthetic (Linear + Vercel inspired).
-- Dark mode primary with theme toggle.
-- Color-coded ACOS badges: Green (<20%), Amber (20-30%), Red (>30%).
-- Inter font family.
-- Responsive grid layouts.
-- Sticky header with branding and export functionality.
-- Breadcrumb navigation and URL-persisted filters.
-- Click-through drilldown tables for navigation.
-- **Campaign Type Filter**: Dashboard-level toggle (Sponsored Products, Sponsored Brands, Display) filters all metrics including country-level performance.
+The portal features a professional, data-focused aesthetic inspired by Linear and Vercel, with a primary dark mode and theme toggle. It uses the Inter font family, responsive grid layouts, and color-coded ACOS badges (Green: <20%, Amber: 20-30%, Red: >30%). Navigation includes a sticky header, breadcrumbs, URL-persisted filters, and click-through drilldown tables. A dashboard-level campaign type filter (Sponsored Products, Sponsored Brands, Display) ensures consistent data views.
 
 ### Technical Implementations
-- **Frontend**: React 18, TypeScript, TailwindCSS, shadcn/ui, Recharts, Wouter.
-- **Backend**: Express, Drizzle ORM, PostgreSQL (Supabase).
-- **Performance Optimizations**:
-    - **Frontend**: DateRange auto-initializes to last 60 days on mount to trigger immediate data loading
-    - **API Response Caching**: 2-minute TTL in-memory cache for /api/kpis, /api/countries, /api/chart-data endpoints
-    - **Exchange Rate Caching**: 5-minute TTL for Frankfurter API responses
-    - **Database Indexes**: Composite indexes on (date, country, campaignId) for all fact tables (brand_search_terms, product_search_terms, display_matched_target)
-    - **Performance Results**: First load ~1.3-1.6s (down from 4-5s), cached loads ~395ms
-- **Core Features**:
-    - **Multi-level Drilldown**: Dashboard → Countries → Campaigns → Ad Groups → Targeting.
-    - **Campaign Type Segmentation**: Dashboard-level filter allows switching between Sponsored Products, Sponsored Brands, and Display to analyze performance by campaign type.
-    - **EUR Currency Conversion**: All metrics displayed in EUR using daily ECB exchange rates; country-specific views show local currency.
-    - **Placement Analysis**: Campaign-level performance by placement type (TOS, ROS, PP, UNKNOWN).
-    - **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders.
-    - **Attribution Window**: Sponsored Products uses 30-day attribution (sales30d, purchases30d) to match Amazon's default dashboard view.
-    - **Performance Charts**: Weekly aggregated ACOS and sales trends.
-    - **Bid Recommendations**: Campaign-specific ACOS targets for all targeting keywords/ASINs with confidence levels. Aggregates by targeting (the keyword/ASIN you bid on) instead of search term (what customers search for), aligning with Amazon's Advertising Console.
-    - **Negative Keywords**: Auto-detection (≥20 clicks, $0 sales) with Excel export.
-    - **Date Range Filtering**: Preset periods (14D, 30D, 60D, 365D, Lifetime from Oct 1 2024) and custom date picker with auto-refresh.
+The frontend is built with React 18, TypeScript, TailwindCSS, shadcn/ui, Recharts, and Wouter. The backend utilizes Express, Drizzle ORM, and PostgreSQL (Supabase). Performance is optimized through frontend date range initialization, 2-minute API response caching, 5-minute exchange rate caching, and composite database indexes.
+
+Core functionalities include:
+- **Multi-level Drilldown**: From Dashboard down to Targeting.
+- **Campaign Type Segmentation**: Dashboard filter for Sponsored Products, Brands, and Display.
+- **EUR Currency Conversion**: All metrics displayed in EUR, with country-specific views showing local currency.
+- **Placement Analysis**: Performance by placement type.
+- **KPI Tracking**: Sales, ACOS, CPC, Cost, CVR, Orders, with 30-day attribution for Sponsored Products.
+- **Performance Charts**: Weekly aggregated ACOS and sales trends.
+- **Bid Recommendations**: Campaign-specific ACOS targets for keywords/ASINs, with confidence levels based on click volume.
+- **Negative Keywords**: Auto-detection (≥20 clicks, $0 sales) with Excel export.
+- **Date Range Filtering**: Presets and custom date picker.
 
 ### Feature Specifications
-- **Campaign-Level Placement Bid Adjustments**: Percentage modifiers (not absolute bids) targeting 20% ACOS, scaled by click volume (confidence).
-    - ACOS ≤ 16%: +10% to +20% increase.
-    - ACOS > 20%: Formula-based decrease, capped at -50%.
-    - ACOS 16-20%: Small adjustments (-10% to +10%).
-    - No sales (≥30 clicks): -25% decrease.
-- **Recommendation Engine**: Provides bid adjustments based on ACOS and sales data, with safeguards (20%-150% of base bid). Confidence levels (Extreme, High, Good, OK) are based on click volume.
-- **Currency Conversion System**:
-    - **Dashboard**: All metrics displayed in EUR with full conversion from all currencies (USD, GBP, SEK, PLN, JPY, CAD) using daily ECB exchange rates.
-    - **Country Views**: Metrics displayed in local currency (USD for US, GBP for GB, SEK for SE, PLN for PL, JPY for JP, CAD for CA, EUR for DE/FR/etc).
-    - **Currency Preservation**: Navigation preserves currency throughout drill-down chain (Dashboard → Country → Campaign → Ad Group).
-    - **Currency Symbols**: Visual indicators display £, $, kr, zł, ¥, € symbols in country-specific views via CurrencyBadge component.
-    - **API Support**: All endpoints (`/api/kpis`, `/api/chart-data`, `/api/campaigns`, `/api/search-terms`) support `convertToEur` parameter.
-    - **Multi-Currency Guards**: Backend validates single-currency aggregation when `convertToEur=false` to prevent mixing USD+GBP+etc.
-    - **Exchange Rates**: Uses Frankfurter API (api.frankfurter.app - European Central Bank) for daily rates with batch date-range support.
-    - **Performance Optimization**: Single batch API call via `getExchangeRatesForRange()` replaces 60+ sequential calls, achieving **16-17x speedup** (22s → 1.4s).
-    - **Country-to-Currency Mapping**: `productPlacement` table lacks currency field; uses `getCurrencyForCountry()` helper to map country codes to currencies.
-    - **Fallback Rates**: When API lacks data (e.g., future dates), silently uses default rates (USD: 0.92, GBP: 1.17, SEK: 0.088, PLN: 0.23, CAD: 0.68 EUR).
-    - **Frontend Integration**: Centralized `useSearchParams` hook extracts country query parameter; views conditionally pass `convertToEur=false`.
-    - **URL Parameters**: Country code propagated via `?country=` query parameter; enables currency persistence across drill-down.
+- **Campaign-Level Placement Bid Adjustments**: Percentage modifiers targeting 20% ACOS, scaled by confidence (click volume).
+- **Recommendation Engine**: Bid adjustments based on ACOS and sales data, with safeguards (20%-150% of base bid) and confidence levels.
+- **Currency Conversion System**: Comprehensive system handling multi-currency display, conversion to EUR using Frankfurter API, and propagation across drill-down views, with fallbacks for missing rates.
+- **Bid Change History Tracking**: Tracks keyword bid adjustments for Sponsored Products and Brands, detecting changes daily and providing API access for history and last changes.
+- **Campaign-Specific ACOS Targets**: Replaces hardcoded ACOS with per-campaign targets stored in `ACOS_Target_Campaign` table, importable via CSV, and integrated into bid recommendation calculations.
+- **Intelligent Bidding Strategy System**: Analyzes ACOS across multiple timeframes (since last bid change, 30D, 365D, Lifetime) using configurable weights. It provides recommendations based on ACOS window, minimum clicks, cooldown periods, and bid caps. Recommendations are tracked with pre-ACOS snapshots and confidence levels.
+- **AI Analytics Agent**: Uses Anthropic Claude Opus 4.5 via SSE streaming. It has 10 tools for querying KPIs, campaigns, search terms, placements, data coverage, and daily breakdowns. The agent provides read-only access to Supabase data.
 
 ### System Design Choices
-- **Database**: Supabase PostgreSQL with 6 tables across 3 campaign types.
-- **Data Structure**:
-    - Separate tables for Brand, Product, and Display campaigns.
-    - Brand tables (`s_brand_search_terms`, `s_brand_placment`) have numeric metrics.
-    - Product tables (`s_products_search_terms`, `s_products_placement`) have TEXT-based sales/purchases requiring casting.
-    - Display tables (`s_display_matched_target`, `s_display_targeting`) have numeric metrics.
-    - `s_brand_placment` contains a typo in the table name.
-    - `s_products_placement` contains `placementClassification` column with Amazon placement types.
-    - Display campaigns use `targetingText` instead of `searchTerm` and `matchedTargetAsin` instead of `keyword`.
-    - **Placement Classification**: Database stores raw values ("Top of Search on-Amazon", "Detail Page on-Amazon", "Other on-Amazon", "Off Amazon") which are normalized to Amazon UI terminology ("Top of search (first page)", "Product pages", "Rest of search", "Off Amazon") via `normalizePlacementName()` helper.
-- **API Architecture**:
-    - All API endpoints filter by `campaignType` (defaults to 'products').
-    - **Campaign Type Filtering (Nov 2025 Fix)**: All three main endpoints (`/api/kpis`, `/api/countries`, `/api/chart-data`) now consistently filter by `campaignType` parameter. Previously, `/api/countries` and `/api/chart-data` aggregated all campaign types regardless of filter, causing KPI totals to not match countries table sums.
-    - `adGroupId` filter is applied ONLY to Sponsored Products; ignored for Sponsored Brands and Display campaigns as they lack this field in a compatible structure.
-    - API responses include calculated fields: `cpc`, `cvr`, `acos`.
-    - Frontend renders use null guards for numeric values: `(val ?? 0).toFixed(2)`.
-
-### Bid Adjustments Integration (Jan 2026)
-- **Purpose**: Links campaign-level bid adjustment percentages from Amazon to placement performance data
-- **Data Source**: "Bid Adjustments" table in Supabase (currently contains IT data, extensible to all countries)
-- **Placement Mapping**: Maps Amazon's internal placement names to normalized display names:
-    - `Placement Top` → "Top of search (first page)"
-    - `Placement Product Page` → "Product pages"  
-    - `Placement Rest Of Search` → "Rest of search"
-    - `Site Amazon Business` → "Amazon Business"
-- **Query Logic**: Uses `DISTINCT ON (placement) ... ORDER BY placement, created_at DESC` to fetch most recent adjustment per placement per campaign
-- **Integration Point**: `/api/campaign-placements` endpoint now returns `bidAdjustment` field with actual percentages from the table
-- **Fallback**: Returns `null` for placements without bid adjustment data (graceful degradation)
-- **Error Handling**: Connection errors are caught and logged; endpoint continues to work without bid adjustments if fetch fails
-
-### Bid Change History Tracking
-- **Purpose**: Tracks when keyword bids are adjusted to analyze performance since the last bid change
-- **Supported Campaign Types**: Sponsored Products and Sponsored Brands (Display campaigns lack bid data)
-- **Table**: `bid_change_history` with columns:
-    - `campaign_type`: 'products' or 'brands'
-    - `targeting`: The keyword/ASIN being bid on
-    - `campaign_id`, `ad_group_id`: Identifiers for the campaign/ad group
-    - `campaign_name`, `ad_group_name`: Display names for context
-    - `country`: Country code for currency context
-    - `date_adjusted`: Date when the bid change was detected
-    - `current_bid`: New bid amount after change
-    - `previous_bid`: Bid amount before change
-    - `match_type`: Keyword match type (exact, phrase, broad)
-- **Detection Logic**: Compares `keywordBid` values across consecutive dates; records changes when bids differ
-- **Automatic Scheduling**: Runs daily at 2:00 AM UTC via node-cron scheduler (initialized on server startup)
-- **API Endpoints**:
-    - `POST /api/migrations/bid-change-history`: One-time table creation
-    - `POST /api/detect-bid-changes`: Run daily to detect bid changes from new data
-    - `GET /api/bid-history`: Query bid change history with filters (targeting, campaignId, dateRange)
-    - `GET /api/bid-history/last-change`: Get the most recent bid change for a specific targeting keyword
-
-### Campaign-Specific ACOS Targets (Jan 2026)
-- **Purpose**: Replaces hardcoded 20% ACOS target with per-campaign targets for accurate bid recommendations
-- **Table**: `ACOS_Target_Campaign` in Supabase
-    - `campaign_id` (TEXT, PRIMARY KEY): Amazon campaign ID
-    - `country` (TEXT): Country code (DE, US, etc.)
-    - `campaign_name` (TEXT): Campaign display name
-    - `acos_target` (NUMERIC): Target as decimal (0.35 = 35%)
-    - `created_at` (TIMESTAMP): Import timestamp
-- **Data Import**: CSV import via `POST /api/import-acos-targets` endpoint
-    - Parses percentage strings (35%) to decimals (0.35)
-    - Skips rows with empty campaign_id
-    - Uses UPSERT for idempotent imports
-- **API Endpoints**:
-    - `GET /api/acos-targets/:campaignId`: Fetch target for specific campaign (returns 404 if not found)
-    - `POST /api/migrations/acos-targets`: Create the table
-    - `POST /api/import-acos-targets`: Import from attached CSV
-- **Integration Points**:
-    - `/api/campaign-placements`: Requires campaignId, fetches target from table, returns 400 if missing
-    - `/api/search-terms`: Accepts optional campaignId, uses campaign target if provided
-    - `/api/recommendations/generate`: Accepts campaignId, uses campaign target for bid calculations
-- **Frontend Propagation**: `campaignId` passed through query params from Campaign View → Ad Group View
-- **Error Handling**: All endpoints return 400 error with actionable message if campaign lacks ACOS target
-- **Calculation Formula**: `targetBidAdjustment = currentBidAdjustment + (targetAcos / actualAcos - 1) * 100`, capped 0-900%
-
-### AI Analytics Agent
-- **Model**: Anthropic Claude Opus 4.5 (claude-opus-4-20250514) via @anthropic-ai/sdk
-- **Endpoint**: `/api/agent/query` with SSE streaming support
-- **Tools Available (10 total)**:
-    - `get_kpis`: Fetch aggregate KPIs (sales, ACOS, cost, clicks, orders) with date range and campaign type filters
-    - `get_campaigns`: List campaigns with performance metrics, sorted by cost
-    - `get_countries_performance`: Country-level breakdown with EUR conversion
-    - `get_top_search_terms`: Search terms ranked by cost with bid recommendations
-    - `get_negative_keyword_candidates`: Identify underperforming keywords (≥20 clicks, $0 sales)
-    - `get_product_placements`: Sponsored Products placement-level performance (Top of Search, Product Pages, Rest of Search)
-    - `get_brand_placements`: Sponsored Brands performance grouped by cost type
-    - `get_display_targeting`: Display targeting performance by targeting expression
-    - `get_data_coverage`: Check for missing dates and data gaps across all 6 tables
-    - `get_daily_breakdown`: Daily-level metrics for trend analysis and anomaly detection
-- **Response Time**: ~10-11 seconds for tool-using queries
-- **Frontend**: Floating chat button (AgentChat component) with message history and suggested questions
-- **Read-Only Access**: Agent can query all 6 Supabase tables but cannot modify data
+The database is Supabase PostgreSQL, structured with separate tables for Brand, Product, and Display campaigns, accommodating their specific data types and structures. API architecture consistently filters by `campaignType` and calculates KPIs like `cpc`, `cvr`, `acos`.
 
 ## External Dependencies
 - **Database**: Supabase (PostgreSQL).
 - **Exchange Rates API**: Frankfurter API (European Central Bank rates).
-- **AI Provider**: Anthropic API (ANTHROPIC_API_KEY in Replit Secrets).
+- **AI Provider**: Anthropic API (for Claude Opus 4.5).

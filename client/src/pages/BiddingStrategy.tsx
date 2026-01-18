@@ -61,16 +61,16 @@ interface BiddingStrategyResponse {
 }
 
 const COUNTRIES = [
-  { code: "DE", name: "Germany", flag: "🇩🇪" },
-  { code: "US", name: "United States", flag: "🇺🇸" },
-  { code: "GB", name: "United Kingdom", flag: "🇬🇧" },
-  { code: "FR", name: "France", flag: "🇫🇷" },
-  { code: "IT", name: "Italy", flag: "🇮🇹" },
-  { code: "ES", name: "Spain", flag: "🇪🇸" },
-  { code: "SE", name: "Sweden", flag: "🇸🇪" },
-  { code: "PL", name: "Poland", flag: "🇵🇱" },
-  { code: "JP", name: "Japan", flag: "🇯🇵" },
-  { code: "CA", name: "Canada", flag: "🇨🇦" },
+  { code: "DE", name: "Germany" },
+  { code: "US", name: "United States" },
+  { code: "GB", name: "United Kingdom" },
+  { code: "FR", name: "France" },
+  { code: "IT", name: "Italy" },
+  { code: "ES", name: "Spain" },
+  { code: "SE", name: "Sweden" },
+  { code: "PL", name: "Poland" },
+  { code: "JP", name: "Japan" },
+  { code: "CA", name: "Canada" },
 ];
 
 const getConfidenceBadgeVariant = (confidence: string) => {
@@ -257,7 +257,7 @@ export default function BiddingStrategy() {
               <SelectContent>
                 {COUNTRIES.map(c => (
                   <SelectItem key={c.code} value={c.code} data-testid={`country-${c.code}`}>
-                    <span className="mr-2">{c.flag}</span> {c.name}
+                    <span className="font-medium mr-1">{c.code}</span> {c.name}
                   </SelectItem>
                 ))}
               </SelectContent>
