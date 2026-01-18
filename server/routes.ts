@@ -12,6 +12,7 @@ import * as XLSX from 'xlsx';
 import { getCached, setCache, generateCacheKey } from "./cache";
 import { queryAgent, queryAgentStream } from "./agent";
 import { createBidChangeHistoryTable } from "./migrations/bidChangeHistory";
+import { createAcosTargetsTable, importAcosTargetsFromCSV, getAcosTargetForCampaign } from "./migrations/acosTargets";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
@@ -2006,6 +2007,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Last bid change query error:', error);
       res.status(500).json({ error: error.message || 'Failed to fetch last bid change' });
+    }
+  });
+
+  // Migration endpoint - creates ACOS_Target_Campaign table
+  app.post("/api/migrations/acos-targets", async (req, res) => {
+    try {
+      await createAcosTargetsTable();
+      res.json({ success: true, message: 'ACOS_Target_Campaign table created/verified' });
+    } catch (error: any) {
+      console.error('Migration error:', error);
+      res.status(500).json({ success: false, error: error.message || 'Migration failed' });
+    }
+  });
+
+  // Import ACOS targets from CSV
+  app.post("/api/import-acos-targets", async (req, res) => {
+    try {
+      const result = await importAcosTargetsFromCSV();
+      res.json({ 
+        success: true, 
+        imported: result.imported, 
+        skipped: result.skipped,
+        errors: result.errors,
+        message: `Imported ${result.imported} campaigns, skipped ${result.skipped}` 
+      });
+    } catch (error: any) {
+      console.error('Import error:', error);
+      res.status(500).json({ success: false, error: error.message || 'Import failed' });
+    }
+  });
+
+  // Get ACOS target for a specific campaign
+  app.get("/api/acos-targets/:campaignId", async (req, res) => {
+    try {
+      const { campaignId } = req.params;
+      const acosTarget = await getAcosTargetForCampaign(campaignId);
+      
+      if (acosTarget === null) {
+        return res.status(404).json({ 
+          error: 'ACOS target not found',
+          message: `No ACOS target configured for campaign ${campaignId}. Please add it to the ACOS_Target_Campaign table.`
+        });
+      }
+      
+      res.json({ campaignId, acosTarget, acosTargetPercent: acosTarget * 100 });
+    } catch (error: any) {
+      console.error('ACOS target query error:', error);
+      res.status(500).json({ error: error.message || 'Failed to fetch ACOS target' });
     }
   });
 
