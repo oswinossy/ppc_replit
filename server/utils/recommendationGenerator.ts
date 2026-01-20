@@ -262,7 +262,7 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
         SUM(COALESCE(cost, 0)) as cost,
         SUM(COALESCE("sales30d", 0)) as sales,
         SUM(COALESCE("purchases30d", 0)) as orders
-      FROM "s_products_placements"
+      FROM "s_products_placement"
       WHERE country = ${country}
         AND "placementClassification" IS NOT NULL
       GROUP BY "campaignId", "campaignName", "placementClassification", "campaignBiddingStrategy"
