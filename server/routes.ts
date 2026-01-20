@@ -2601,6 +2601,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Generate recommendations for a single country (faster than all countries)
+  app.post("/api/recommendations/generate/:country", async (req, res) => {
+    try {
+      const { country } = req.params;
+      const { generateRecommendationsForCountry } = await import('./utils/recommendationGenerator');
+      const result = await generateRecommendationsForCountry(country);
+      res.json({ 
+        success: true, 
+        message: `Recommendations generated for ${country}`,
+        country,
+        ...result
+      });
+    } catch (error: any) {
+      console.error('Error generating recommendations:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Unified export with both keyword bids AND placement adjustments
   app.get("/api/exports/bid-recommendations.xlsx", async (req, res) => {
     try {
@@ -2621,45 +2639,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const d365WeightPct = Math.round(weights.d365_weight * 100);
       const lifetimeWeightPct = Math.round(weights.lifetime_weight * 100);
 
-      // Query keyword recommendations from recommendation_history
-      const keywordRecsQuery = campaignIdFilter
-        ? sql`
-            SELECT * FROM recommendation_history 
-            WHERE country = ${countryStr} 
-              AND campaign_id = ${campaignIdFilter}
-              AND recommendation_type = 'keyword_bid'
-              AND created_at >= NOW() - INTERVAL '7 days'
-            ORDER BY created_at DESC
-          `
-        : sql`
-            SELECT * FROM recommendation_history 
-            WHERE country = ${countryStr} 
-              AND recommendation_type = 'keyword_bid'
-              AND created_at >= NOW() - INTERVAL '7 days'
-            ORDER BY created_at DESC
-          `;
+      // First try recommendation_history, fallback to live API
+      let keywordRecs: any[] = [];
+      let placementRecs: any[] = [];
       
-      const keywordRecs = await db.execute(keywordRecsQuery);
-
-      // Query placement recommendations from recommendation_history
-      const placementRecsQuery = campaignIdFilter
-        ? sql`
-            SELECT * FROM recommendation_history 
-            WHERE country = ${countryStr} 
-              AND campaign_id = ${campaignIdFilter}
-              AND recommendation_type = 'placement_adjustment'
-              AND created_at >= NOW() - INTERVAL '7 days'
-            ORDER BY created_at DESC
-          `
-        : sql`
-            SELECT * FROM recommendation_history 
-            WHERE country = ${countryStr} 
-              AND recommendation_type = 'placement_adjustment'
-              AND created_at >= NOW() - INTERVAL '7 days'
-            ORDER BY created_at DESC
-          `;
+      // Try to get from recommendation_history first
+      const historyQuery = campaignIdFilter
+        ? sql`SELECT * FROM recommendation_history WHERE country = ${countryStr} AND campaign_id = ${campaignIdFilter} AND created_at >= NOW() - INTERVAL '7 days' ORDER BY created_at DESC`
+        : sql`SELECT * FROM recommendation_history WHERE country = ${countryStr} AND created_at >= NOW() - INTERVAL '7 days' ORDER BY created_at DESC`;
       
-      const placementRecs = await db.execute(placementRecsQuery);
+      const historyRecs = await db.execute(historyQuery);
+      keywordRecs = (historyRecs as any[]).filter((r: any) => r.recommendation_type === 'keyword_bid');
+      placementRecs = (historyRecs as any[]).filter((r: any) => r.recommendation_type === 'placement_adjustment');
+      
+      // If no recommendations in history, fetch live from bidding-strategy API
+      if (keywordRecs.length === 0) {
+        const host = req.get('host') || 'localhost:5000';
+        const protocol = req.protocol || 'http';
+        const strategyUrl = campaignIdFilter 
+          ? `${protocol}://${host}/api/bidding-strategy?country=${countryStr}&campaignId=${campaignIdFilter}`
+          : `${protocol}://${host}/api/bidding-strategy?country=${countryStr}`;
+        
+        const strategyResponse = await fetch(strategyUrl);
+        if (strategyResponse.ok) {
+          const strategyData = await strategyResponse.json();
+          // Convert bidding-strategy format to recommendation format
+          keywordRecs = (strategyData.recommendations || []).map((rec: any) => ({
+            country: countryStr,
+            campaign_id: rec.campaignId,
+            campaign_name: rec.campaignName,
+            ad_group_name: rec.adGroupName,
+            targeting: rec.targeting,
+            match_type: rec.matchType,
+            old_value: rec.currentBid,
+            recommended_value: rec.recommendedBid,
+            weighted_acos: rec.weightedAcos,
+            acos_target: rec.targetAcos,
+            pre_acos_t0: rec.t0Acos,
+            pre_acos_30d: rec.d30Acos,
+            pre_acos_365d: rec.d365Acos,
+            pre_acos_lifetime: rec.lifetimeAcos,
+            pre_clicks_lifetime: rec.totalClicks,
+            confidence: rec.confidence,
+            reason: rec.reason
+          }));
+        }
+      }
 
       // Build set of campaigns with placement recommendations
       const campaignsWithPlacements = new Set(
@@ -2675,14 +2700,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const keywordData = (keywordRecs as any[]).map((rec: any) => {
         const hasBoth = campaignsWithPlacements.has(rec.campaign_id);
         const timeframesUsed: string[] = [];
-        if (rec.pre_acos_t0 !== null) timeframesUsed.push('T0');
-        if (rec.pre_acos_30d !== null) timeframesUsed.push('30D');
-        if (rec.pre_acos_365d !== null) timeframesUsed.push('365D');
-        if (rec.pre_acos_lifetime !== null) timeframesUsed.push('Lifetime');
+        if (rec.pre_acos_t0 !== null && rec.pre_acos_t0 !== undefined) timeframesUsed.push('T0');
+        if (rec.pre_acos_30d !== null && rec.pre_acos_30d !== undefined) timeframesUsed.push('30D');
+        if (rec.pre_acos_365d !== null && rec.pre_acos_365d !== undefined) timeframesUsed.push('365D');
+        if (rec.pre_acos_lifetime !== null && rec.pre_acos_lifetime !== undefined) timeframesUsed.push('Lifetime');
         
-        const changePercent = rec.old_value > 0 
-          ? Math.round(((rec.recommended_value - rec.old_value) / rec.old_value) * 100)
+        const oldVal = Number(rec.old_value) || 0;
+        const newVal = Number(rec.recommended_value) || 0;
+        const changePercent = oldVal > 0 
+          ? Math.round(((newVal - oldVal) / oldVal) * 100)
           : 0;
+        
+        const acosTarget = Number(rec.acos_target) || 0;
+        const weightedAcos = Number(rec.weighted_acos) || 0;
         
         return {
           'NEEDS BOTH ADJUSTMENTS': hasBoth ? 'YES - ALSO CHECK PLACEMENTS' : '',
@@ -2691,17 +2721,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'Ad Group Name': rec.ad_group_name || '',
           'Targeting': rec.targeting,
           'Match Type': rec.match_type,
-          'Current Bid': `€${rec.old_value?.toFixed(2) || '0.00'}`,
-          'Recommended Bid': `€${rec.recommended_value?.toFixed(2) || '0.00'}`,
+          'Current Bid': `€${oldVal.toFixed(2)}`,
+          'Recommended Bid': `€${newVal.toFixed(2)}`,
           'Change %': `${changePercent}%`,
-          'Action': rec.recommended_value > rec.old_value ? 'increase' : 'decrease',
-          'ACOS Target': `${Math.round((rec.acos_target || 0) * 100)}%`,
-          'Weighted ACOS': `${Math.round((rec.weighted_acos || 0) * 100)}%`,
-          'T0 ACOS': rec.pre_acos_t0 ? `${Math.round(rec.pre_acos_t0 * 100)}%` : 'N/A',
-          '30D ACOS': rec.pre_acos_30d ? `${Math.round(rec.pre_acos_30d * 100)}%` : 'N/A',
-          '365D ACOS': rec.pre_acos_365d ? `${Math.round(rec.pre_acos_365d * 100)}%` : 'N/A',
-          'Lifetime ACOS': rec.pre_acos_lifetime ? `${Math.round(rec.pre_acos_lifetime * 100)}%` : 'N/A',
-          'Lifetime Clicks': rec.pre_clicks_lifetime || 0,
+          'Action': newVal > oldVal ? 'increase' : 'decrease',
+          'ACOS Target': `${Math.round(acosTarget * 100)}%`,
+          'Weighted ACOS': `${Math.round(weightedAcos * 100)}%`,
+          'T0 ACOS': rec.pre_acos_t0 != null ? `${Math.round(Number(rec.pre_acos_t0) * 100)}%` : 'N/A',
+          '30D ACOS': rec.pre_acos_30d != null ? `${Math.round(Number(rec.pre_acos_30d) * 100)}%` : 'N/A',
+          '365D ACOS': rec.pre_acos_365d != null ? `${Math.round(Number(rec.pre_acos_365d) * 100)}%` : 'N/A',
+          'Lifetime ACOS': rec.pre_acos_lifetime != null ? `${Math.round(Number(rec.pre_acos_lifetime) * 100)}%` : 'N/A',
+          'Lifetime Clicks': Number(rec.pre_clicks_lifetime) || 0,
           'Confidence': rec.confidence || '',
           'Timeframes Used': timeframesUsed.join(', ') || 'None',
           'T0 Weight': `${t0WeightPct}%`,

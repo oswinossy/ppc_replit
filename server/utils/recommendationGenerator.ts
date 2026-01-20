@@ -28,6 +28,18 @@ export async function generateDailyRecommendations(): Promise<{ total: number; c
   return { total: totalKeywords + totalPlacements, countries: countriesProcessed, keywords: totalKeywords, placements: totalPlacements };
 }
 
+// Generate recommendations for a single country (faster for on-demand requests)
+export async function generateRecommendationsForCountry(country: string): Promise<{ keywords: number; placements: number; total: number }> {
+  const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+  
+  const keywordCount = await generateKeywordRecommendationsForCountry(country, connectionUrl);
+  const placementCount = await generatePlacementRecommendationsForCountry(country, connectionUrl);
+  
+  console.log(`[RecommendationGenerator] ${country}: ${keywordCount} keyword + ${placementCount} placement recommendations`);
+  
+  return { keywords: keywordCount, placements: placementCount, total: keywordCount + placementCount };
+}
+
 async function generateKeywordRecommendationsForCountry(country: string, connectionUrl: string): Promise<number> {
   const sqlClient = postgres(connectionUrl);
   
