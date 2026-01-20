@@ -3,28 +3,32 @@ import { getWeightsForCountry, saveRecommendation } from '../migrations/biddingS
 
 const COUNTRIES = ['DE', 'FR', 'IT', 'ES', 'NL', 'BE', 'AT', 'PL', 'SE', 'UK', 'US'];
 
-export async function generateDailyRecommendations(): Promise<{ total: number; countries: number }> {
+export async function generateDailyRecommendations(): Promise<{ total: number; countries: number; keywords: number; placements: number }> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  let totalRecommendations = 0;
+  let totalKeywords = 0;
+  let totalPlacements = 0;
   let countriesProcessed = 0;
 
   for (const country of COUNTRIES) {
     try {
-      const count = await generateRecommendationsForCountry(country, connectionUrl);
-      if (count > 0) {
-        totalRecommendations += count;
+      const keywordCount = await generateKeywordRecommendationsForCountry(country, connectionUrl);
+      const placementCount = await generatePlacementRecommendationsForCountry(country, connectionUrl);
+      
+      if (keywordCount > 0 || placementCount > 0) {
+        totalKeywords += keywordCount;
+        totalPlacements += placementCount;
         countriesProcessed++;
-        console.log(`[RecommendationGenerator] ${country}: ${count} recommendations generated`);
+        console.log(`[RecommendationGenerator] ${country}: ${keywordCount} keyword + ${placementCount} placement recommendations`);
       }
     } catch (error) {
       console.error(`[RecommendationGenerator] Error processing ${country}:`, error);
     }
   }
 
-  return { total: totalRecommendations, countries: countriesProcessed };
+  return { total: totalKeywords + totalPlacements, countries: countriesProcessed, keywords: totalKeywords, placements: totalPlacements };
 }
 
-async function generateRecommendationsForCountry(country: string, connectionUrl: string): Promise<number> {
+async function generateKeywordRecommendationsForCountry(country: string, connectionUrl: string): Promise<number> {
   const sqlClient = postgres(connectionUrl);
   
   try {
@@ -204,6 +208,127 @@ async function generateRecommendationsForCountry(country: string, connectionUrl:
         acos_target: targetAcos,
         confidence,
         reason: `Weighted ACOS (${Math.round(weightedAcos * 100)}%) is ${action === 'decrease' ? 'above' : 'below'} target (${Math.round(targetAcos * 100)}%)`
+      });
+      
+      savedCount++;
+    }
+
+    return savedCount;
+  } finally {
+    await sqlClient.end();
+  }
+}
+
+async function generatePlacementRecommendationsForCountry(country: string, connectionUrl: string): Promise<number> {
+  const sqlClient = postgres(connectionUrl);
+  const MIN_CLICKS = 30; // Same as keyword recommendations
+  const ACOS_WINDOW = 10; // ±10% window for placements
+  
+  try {
+    // Get ACOS targets for campaigns in this country
+    const acosTargetsResult = await sqlClient`
+      SELECT campaign_id, acos_target, campaign_name 
+      FROM "ACOS_Target_Campaign" 
+      WHERE country = ${country}
+    `;
+    const acosTargetsMap = new Map(acosTargetsResult.map((r: any) => [r.campaign_id, { target: Number(r.acos_target), name: r.campaign_name }]));
+
+    if (acosTargetsMap.size === 0) {
+      return 0;
+    }
+
+    // Query placement data grouped by campaign (minimum 30 clicks same as keywords)
+    const placementData = await sqlClient`
+      SELECT 
+        "campaignId" as campaign_id,
+        "campaignName" as campaign_name,
+        "placementClassification" as placement,
+        "campaignBiddingStrategy" as bidding_strategy,
+        MAX("placementBidAdjustment") as current_adjustment,
+        SUM(COALESCE(impressions, 0)) as impressions,
+        SUM(COALESCE(clicks, 0)) as clicks,
+        SUM(COALESCE(cost, 0)) as cost,
+        SUM(COALESCE("sales30d", 0)) as sales,
+        SUM(COALESCE("purchases30d", 0)) as orders
+      FROM "s_products_placements"
+      WHERE country = ${country}
+        AND "placementClassification" IS NOT NULL
+      GROUP BY "campaignId", "campaignName", "placementClassification", "campaignBiddingStrategy"
+      HAVING SUM(COALESCE(clicks, 0)) >= ${MIN_CLICKS}
+      ORDER BY SUM(COALESCE(cost, 0)) DESC
+    `;
+
+    let savedCount = 0;
+
+    for (const p of placementData) {
+      const campaignTarget = acosTargetsMap.get(p.campaign_id);
+      if (!campaignTarget) continue;
+
+      const targetAcos = campaignTarget.target * 100; // Convert to percentage
+      const clicks = Number(p.clicks);
+      const cost = Number(p.cost);
+      const sales = Number(p.sales);
+      const currentAdjustment = p.current_adjustment !== null ? Number(p.current_adjustment) : 0;
+      
+      if (clicks < MIN_CLICKS) continue;
+      
+      // Calculate ACOS (999 = high clicks but no sales = problem)
+      const acos = sales > 0 ? (cost / sales) * 100 : (clicks >= MIN_CLICKS ? 999 : null);
+      if (acos === null) continue;
+
+      // FIRST check: Skip if ACOS is within target window (±10%)
+      // Only generate recommendation if ACOS is OUTSIDE the target range
+      if (acos !== 999 && acos >= targetAcos - ACOS_WINDOW && acos <= targetAcos + ACOS_WINDOW) {
+        continue; // Within acceptable range, no adjustment needed
+      }
+
+      // Calculate target bid adjustment based on ACOS performance
+      let targetAdjustment: number | null = null;
+      
+      if (acos !== 999 && acos > 0) {
+        // Adjustment multiplier based on ACOS vs target
+        const multiplier = targetAcos / acos;
+        
+        // Calculate new adjustment
+        // If ACOS is 2x target, we reduce adjustment by 50%
+        // If ACOS is 0.5x target, we increase adjustment by 50%
+        const adjustmentChange = Math.round((multiplier - 1) * 50);
+        targetAdjustment = Math.max(-90, Math.min(900, currentAdjustment + adjustmentChange));
+        
+        // Round to nearest 5%
+        targetAdjustment = Math.round(targetAdjustment / 5) * 5;
+      } else if (acos === 999) {
+        // High clicks, no sales - reduce adjustment significantly
+        targetAdjustment = Math.max(-90, currentAdjustment - 25);
+        targetAdjustment = Math.round(targetAdjustment / 5) * 5;
+      }
+      
+      // Skip if adjustment is the same
+      if (targetAdjustment === null || targetAdjustment === currentAdjustment) continue;
+
+      // Determine confidence based on clicks (same thresholds as keywords)
+      let confidence = 'Low';
+      if (clicks >= 200) confidence = 'Extreme';
+      else if (clicks >= 100) confidence = 'High';
+      else if (clicks >= 50) confidence = 'Good';
+      else if (clicks >= MIN_CLICKS) confidence = 'OK';
+
+      const action = acos > targetAcos ? 'decrease' : 'increase';
+
+      await saveRecommendation({
+        country,
+        campaign_id: p.campaign_id,
+        campaign_name: p.campaign_name,
+        targeting: p.placement,
+        match_type: p.bidding_strategy || 'placement',
+        recommendation_type: 'placement_adjustment',
+        old_value: currentAdjustment,
+        recommended_value: targetAdjustment,
+        weighted_acos: acos / 100, // Store as decimal
+        acos_target: campaignTarget.target,
+        pre_clicks_lifetime: clicks,
+        confidence,
+        reason: `Placement ACOS (${acos === 999 ? 'No Sales' : acos.toFixed(1) + '%'}) ${action === 'decrease' ? 'exceeds' : 'below'} target range (${(targetAcos - ACOS_WINDOW).toFixed(0)}%-${(targetAcos + ACOS_WINDOW).toFixed(0)}%). Adjust from ${currentAdjustment}% to ${targetAdjustment}%`
       });
       
       savedCount++;

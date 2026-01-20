@@ -130,14 +130,12 @@ export default function CampaignView() {
 
   const handleExportRecommendations = async () => {
     const params = new URLSearchParams({ 
-      campaignId,
-      from: dateRange.from, 
-      to: dateRange.to
+      campaignId
     });
     if (countryCode) {
       params.append('country', countryCode);
     }
-    window.open(`/api/exports/recommendations.csv?${params}`, '_blank');
+    window.open(`/api/exports/bid-recommendations.xlsx?${params}`, '_blank');
   };
 
   const kpiCards = (kpis && !kpis.error) ? [

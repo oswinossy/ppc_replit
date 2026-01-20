@@ -2585,7 +2585,232 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Export recommendations to Excel
+  // Manual trigger for daily recommendation generation (for testing/on-demand)
+  app.post("/api/recommendations/generate-daily", async (req, res) => {
+    try {
+      const { generateDailyRecommendations } = await import('./utils/recommendationGenerator');
+      const result = await generateDailyRecommendations();
+      res.json({ 
+        success: true, 
+        message: 'Recommendations generated successfully',
+        ...result
+      });
+    } catch (error: any) {
+      console.error('Error generating recommendations:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Unified export with both keyword bids AND placement adjustments
+  app.get("/api/exports/bid-recommendations.xlsx", async (req, res) => {
+    try {
+      const { country, campaignId } = req.query;
+      
+      if (!country) {
+        return res.status(400).json({ error: 'Country parameter is required' });
+      }
+
+      const countryStr = country as string;
+      const campaignIdFilter = campaignId as string | undefined;
+      const wb = XLSX.utils.book_new();
+      
+      // Get weights for this country
+      const weights = await getWeightsForCountry(countryStr);
+      const t0WeightPct = Math.round(weights.t0_weight * 100);
+      const d30WeightPct = Math.round(weights.d30_weight * 100);
+      const d365WeightPct = Math.round(weights.d365_weight * 100);
+      const lifetimeWeightPct = Math.round(weights.lifetime_weight * 100);
+
+      // Query keyword recommendations from recommendation_history
+      const keywordRecsQuery = campaignIdFilter
+        ? sql`
+            SELECT * FROM recommendation_history 
+            WHERE country = ${countryStr} 
+              AND campaign_id = ${campaignIdFilter}
+              AND recommendation_type = 'keyword_bid'
+              AND created_at >= NOW() - INTERVAL '7 days'
+            ORDER BY created_at DESC
+          `
+        : sql`
+            SELECT * FROM recommendation_history 
+            WHERE country = ${countryStr} 
+              AND recommendation_type = 'keyword_bid'
+              AND created_at >= NOW() - INTERVAL '7 days'
+            ORDER BY created_at DESC
+          `;
+      
+      const keywordRecs = await db.execute(keywordRecsQuery);
+
+      // Query placement recommendations from recommendation_history
+      const placementRecsQuery = campaignIdFilter
+        ? sql`
+            SELECT * FROM recommendation_history 
+            WHERE country = ${countryStr} 
+              AND campaign_id = ${campaignIdFilter}
+              AND recommendation_type = 'placement_adjustment'
+              AND created_at >= NOW() - INTERVAL '7 days'
+            ORDER BY created_at DESC
+          `
+        : sql`
+            SELECT * FROM recommendation_history 
+            WHERE country = ${countryStr} 
+              AND recommendation_type = 'placement_adjustment'
+              AND created_at >= NOW() - INTERVAL '7 days'
+            ORDER BY created_at DESC
+          `;
+      
+      const placementRecs = await db.execute(placementRecsQuery);
+
+      // Build set of campaigns with placement recommendations
+      const campaignsWithPlacements = new Set(
+        (placementRecs as any[]).map((r: any) => r.campaign_id)
+      );
+      
+      // Build set of campaigns with keyword recommendations
+      const campaignsWithKeywords = new Set(
+        (keywordRecs as any[]).map((r: any) => r.campaign_id)
+      );
+
+      // Create keyword recommendations sheet
+      const keywordData = (keywordRecs as any[]).map((rec: any) => {
+        const hasBoth = campaignsWithPlacements.has(rec.campaign_id);
+        const timeframesUsed: string[] = [];
+        if (rec.pre_acos_t0 !== null) timeframesUsed.push('T0');
+        if (rec.pre_acos_30d !== null) timeframesUsed.push('30D');
+        if (rec.pre_acos_365d !== null) timeframesUsed.push('365D');
+        if (rec.pre_acos_lifetime !== null) timeframesUsed.push('Lifetime');
+        
+        const changePercent = rec.old_value > 0 
+          ? Math.round(((rec.recommended_value - rec.old_value) / rec.old_value) * 100)
+          : 0;
+        
+        return {
+          'NEEDS BOTH ADJUSTMENTS': hasBoth ? 'YES - ALSO CHECK PLACEMENTS' : '',
+          'Country': rec.country,
+          'Campaign Name': rec.campaign_name,
+          'Ad Group Name': rec.ad_group_name || '',
+          'Targeting': rec.targeting,
+          'Match Type': rec.match_type,
+          'Current Bid': `€${rec.old_value?.toFixed(2) || '0.00'}`,
+          'Recommended Bid': `€${rec.recommended_value?.toFixed(2) || '0.00'}`,
+          'Change %': `${changePercent}%`,
+          'Action': rec.recommended_value > rec.old_value ? 'increase' : 'decrease',
+          'ACOS Target': `${Math.round((rec.acos_target || 0) * 100)}%`,
+          'Weighted ACOS': `${Math.round((rec.weighted_acos || 0) * 100)}%`,
+          'T0 ACOS': rec.pre_acos_t0 ? `${Math.round(rec.pre_acos_t0 * 100)}%` : 'N/A',
+          '30D ACOS': rec.pre_acos_30d ? `${Math.round(rec.pre_acos_30d * 100)}%` : 'N/A',
+          '365D ACOS': rec.pre_acos_365d ? `${Math.round(rec.pre_acos_365d * 100)}%` : 'N/A',
+          'Lifetime ACOS': rec.pre_acos_lifetime ? `${Math.round(rec.pre_acos_lifetime * 100)}%` : 'N/A',
+          'Lifetime Clicks': rec.pre_clicks_lifetime || 0,
+          'Confidence': rec.confidence || '',
+          'Timeframes Used': timeframesUsed.join(', ') || 'None',
+          'T0 Weight': `${t0WeightPct}%`,
+          '30D Weight': `${d30WeightPct}%`,
+          '365D Weight': `${d365WeightPct}%`,
+          'Lifetime Weight': `${lifetimeWeightPct}%`,
+          'Reason': rec.reason || ''
+        };
+      });
+
+      // Create placement recommendations sheet
+      const placementData = (placementRecs as any[]).map((rec: any) => {
+        const hasBoth = campaignsWithKeywords.has(rec.campaign_id);
+        
+        return {
+          'NEEDS BOTH ADJUSTMENTS': hasBoth ? 'YES - ALSO CHECK KEYWORDS' : '',
+          'Country': rec.country,
+          'Campaign Name': rec.campaign_name,
+          'Placement': rec.targeting,
+          'Bidding Strategy': rec.match_type || 'N/A',
+          'Current Adjustment': `${rec.old_value || 0}%`,
+          'Recommended Adjustment': `${rec.recommended_value || 0}%`,
+          'Change': `${(rec.recommended_value || 0) - (rec.old_value || 0) > 0 ? '+' : ''}${(rec.recommended_value || 0) - (rec.old_value || 0)}%`,
+          'Clicks': rec.pre_clicks_lifetime || 0,
+          'ACOS': rec.weighted_acos ? `${Math.round(rec.weighted_acos * 100)}%` : 'N/A',
+          'Target ACOS': `${Math.round((rec.acos_target || 0) * 100)}%`,
+          'Confidence': rec.confidence || '',
+          'Reason': rec.reason || ''
+        };
+      });
+
+      // Add sheets to workbook
+      if (keywordData.length > 0) {
+        const wsKeywords = XLSX.utils.json_to_sheet(keywordData);
+        XLSX.utils.book_append_sheet(wb, wsKeywords, 'Keyword Bid Changes');
+      }
+
+      if (placementData.length > 0) {
+        const wsPlacements = XLSX.utils.json_to_sheet(placementData);
+        XLSX.utils.book_append_sheet(wb, wsPlacements, 'Placement Adjustments');
+      }
+
+      // Add summary sheet with campaigns needing both adjustments
+      const campaignsNeedingBoth = Array.from(campaignsWithPlacements)
+        .filter(cId => campaignsWithKeywords.has(cId as string));
+      
+      if (campaignsNeedingBoth.length > 0) {
+        const bothData = campaignsNeedingBoth.map(cId => {
+          const keywordCount = (keywordRecs as any[]).filter(r => r.campaign_id === cId).length;
+          const placementCount = (placementRecs as any[]).filter(r => r.campaign_id === cId).length;
+          const campaignName = (keywordRecs as any[]).find(r => r.campaign_id === cId)?.campaign_name || 
+                              (placementRecs as any[]).find(r => r.campaign_id === cId)?.campaign_name || cId;
+          return {
+            'Campaign ID': cId,
+            'Campaign Name': campaignName,
+            'Keyword Bid Changes': keywordCount,
+            'Placement Adjustments': placementCount,
+            'Total Changes Needed': keywordCount + placementCount,
+            'Priority': 'HIGH - Review Both Types'
+          };
+        });
+        const wsBoth = XLSX.utils.json_to_sheet(bothData);
+        XLSX.utils.book_append_sheet(wb, wsBoth, 'PRIORITY - Needs Both');
+      }
+
+      // Add metadata sheet
+      const metadataData = [{
+        'Export Date': new Date().toISOString().split('T')[0],
+        'Country': countryStr,
+        'Campaign Filter': campaignIdFilter || 'All Campaigns',
+        'T0 Weight': `${t0WeightPct}%`,
+        '30D Weight': `${d30WeightPct}%`,
+        '365D Weight': `${d365WeightPct}%`,
+        'Lifetime Weight': `${lifetimeWeightPct}%`,
+        'Total Keyword Changes': keywordData.length,
+        'Total Placement Changes': placementData.length,
+        'Campaigns Needing Both': campaignsNeedingBoth.length,
+        'Note': 'Recommendations generated daily at 3:00 AM UTC. Items marked "NEEDS BOTH ADJUSTMENTS" require attention in both sheets.'
+      }];
+      const wsMetadata = XLSX.utils.json_to_sheet(metadataData);
+      XLSX.utils.book_append_sheet(wb, wsMetadata, 'Export Info');
+
+      // If no recommendations found
+      if (keywordData.length === 0 && placementData.length === 0) {
+        const emptyData = [{
+          'Message': 'No recommendations found for the selected filters',
+          'Country': countryStr,
+          'Campaign': campaignIdFilter || 'All',
+          'Suggestion': 'Recommendations are generated daily at 3:00 AM UTC. Check back after the next generation run.'
+        }];
+        const wsEmpty = XLSX.utils.json_to_sheet(emptyData);
+        XLSX.utils.book_append_sheet(wb, wsEmpty, 'No Data');
+      }
+
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      const filename = campaignIdFilter 
+        ? `bid-recommendations-${countryStr}-campaign-${new Date().toISOString().split('T')[0]}.xlsx`
+        : `bid-recommendations-${countryStr}-${new Date().toISOString().split('T')[0]}.xlsx`;
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error('Export bid recommendations error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Legacy export endpoint (kept for backward compatibility)
   app.get("/api/exports/bidding-strategy.xlsx", async (req, res) => {
     try {
       const { country } = req.query;

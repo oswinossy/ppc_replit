@@ -84,11 +84,9 @@ export default function CountryView() {
 
   const handleExportRecommendations = async () => {
     const params = new URLSearchParams({ 
-      country: countryCode,
-      from: dateRange.from, 
-      to: dateRange.to
+      country: countryCode
     });
-    window.open(`/api/exports/recommendations.csv?${params}`, '_blank');
+    window.open(`/api/exports/bid-recommendations.xlsx?${params}`, '_blank');
   };
   
   // Get display name for campaign type
