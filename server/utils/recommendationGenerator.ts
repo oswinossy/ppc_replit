@@ -250,24 +250,23 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
     }
 
     // Query placement data grouped by campaign (minimum 30 clicks same as keywords)
+    // Note: placementBidAdjustment and campaignBiddingStrategy not available in raw data
     const placementData = await sqlClient`
       SELECT 
         "campaignId" as campaign_id,
         "campaignName" as campaign_name,
         "placementClassification" as placement,
-        "campaignBiddingStrategy" as bidding_strategy,
-        MAX("placementBidAdjustment") as current_adjustment,
-        SUM(COALESCE(impressions, 0)) as impressions,
-        SUM(COALESCE(clicks, 0)) as clicks,
-        SUM(COALESCE(cost, 0)) as cost,
-        SUM(COALESCE("sales30d", 0)) as sales,
-        SUM(COALESCE("purchases30d", 0)) as orders
+        SUM(COALESCE(NULLIF(impressions, '')::numeric, 0)) as impressions,
+        SUM(COALESCE(NULLIF(clicks, '')::numeric, 0)) as clicks,
+        SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) as cost,
+        SUM(COALESCE(NULLIF("sales30d", '')::numeric, 0)) as sales,
+        SUM(COALESCE(NULLIF("purchases30d", '')::numeric, 0)) as orders
       FROM "s_products_placement"
       WHERE country = ${country}
         AND "placementClassification" IS NOT NULL
-      GROUP BY "campaignId", "campaignName", "placementClassification", "campaignBiddingStrategy"
-      HAVING SUM(COALESCE(clicks, 0)) >= ${MIN_CLICKS}
-      ORDER BY SUM(COALESCE(cost, 0)) DESC
+      GROUP BY "campaignId", "campaignName", "placementClassification"
+      HAVING SUM(COALESCE(NULLIF(clicks, '')::numeric, 0)) >= ${MIN_CLICKS}
+      ORDER BY SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) DESC
     `;
 
     let savedCount = 0;
@@ -280,7 +279,7 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
       const clicks = Number(p.clicks);
       const cost = Number(p.cost);
       const sales = Number(p.sales);
-      const currentAdjustment = p.current_adjustment !== null ? Number(p.current_adjustment) : 0;
+      const currentAdjustment = 0; // Default - actual value not in raw data
       
       if (clicks < MIN_CLICKS) continue;
       
@@ -332,7 +331,7 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
         campaign_id: p.campaign_id,
         campaign_name: p.campaign_name,
         targeting: p.placement,
-        match_type: p.bidding_strategy || 'placement',
+        match_type: 'placement',
         recommendation_type: 'placement_adjustment',
         old_value: currentAdjustment,
         recommended_value: targetAdjustment,

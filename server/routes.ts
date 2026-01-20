@@ -2545,6 +2545,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Live placement bidding strategy endpoint - returns placement recommendations without saving
+  app.get("/api/placement-bidding-strategy", async (req, res) => {
+    try {
+      const { country, campaignId } = req.query;
+      
+      if (!country) {
+        return res.status(400).json({ error: 'Country parameter is required' });
+      }
+
+      const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+      const sqlClient = postgres(connectionUrl);
+      const MIN_CLICKS = 30;
+      const ACOS_WINDOW = 10; // ±10% window for placements
+
+      // Get ACOS targets for campaigns in this country
+      const acosTargetsResult = await sqlClient`
+        SELECT campaign_id, acos_target, campaign_name 
+        FROM "ACOS_Target_Campaign" 
+        WHERE country = ${country as string}
+      `;
+      const acosTargetsMap = new Map(acosTargetsResult.map((r: any) => [r.campaign_id, { target: Number(r.acos_target), name: r.campaign_name }]));
+
+      // Query placement data grouped by campaign (no bid adjustment column in raw data)
+      const placementData = await sqlClient`
+        SELECT 
+          "campaignId" as campaign_id,
+          "campaignName" as campaign_name,
+          "placementClassification" as placement,
+          SUM(COALESCE(NULLIF(impressions, '')::numeric, 0)) as impressions,
+          SUM(COALESCE(NULLIF(clicks, '')::numeric, 0)) as clicks,
+          SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) as cost,
+          SUM(COALESCE(NULLIF("sales30d", '')::numeric, 0)) as sales,
+          SUM(COALESCE(NULLIF("purchases30d", '')::numeric, 0)) as orders
+        FROM "s_products_placement"
+        WHERE country = ${country as string}
+          AND "placementClassification" IS NOT NULL
+          ${campaignId ? sqlClient`AND "campaignId" = ${campaignId as string}` : sqlClient``}
+        GROUP BY "campaignId", "campaignName", "placementClassification"
+        HAVING SUM(COALESCE(NULLIF(clicks, '')::numeric, 0)) >= ${MIN_CLICKS}
+        ORDER BY SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) DESC
+      `;
+
+      const recommendations: any[] = [];
+
+      for (const p of placementData) {
+        const campaignTarget = acosTargetsMap.get(p.campaign_id);
+        if (!campaignTarget) continue;
+
+        const targetAcos = campaignTarget.target * 100; // Convert to percentage
+        const clicks = Number(p.clicks);
+        const cost = Number(p.cost);
+        const sales = Number(p.sales);
+        const currentAdjustment = 0; // Default - actual value not in raw data
+        
+        if (clicks < MIN_CLICKS) continue;
+        
+        // Calculate ACOS (999 = high clicks but no sales = problem)
+        const acos = sales > 0 ? (cost / sales) * 100 : (clicks >= MIN_CLICKS ? 999 : null);
+        if (acos === null) continue;
+
+        // Skip if ACOS is within target window (±10%)
+        if (acos !== 999 && acos >= targetAcos - ACOS_WINDOW && acos <= targetAcos + ACOS_WINDOW) {
+          continue;
+        }
+
+        // Calculate target bid adjustment
+        let targetAdjustment: number | null = null;
+        
+        if (acos !== 999 && acos > 0) {
+          const multiplier = targetAcos / acos;
+          const adjustmentChange = Math.round((multiplier - 1) * 50);
+          targetAdjustment = Math.max(-90, Math.min(900, currentAdjustment + adjustmentChange));
+          targetAdjustment = Math.round(targetAdjustment / 5) * 5;
+        } else if (acos === 999) {
+          targetAdjustment = Math.max(-90, currentAdjustment - 25);
+          targetAdjustment = Math.round(targetAdjustment / 5) * 5;
+        }
+        
+        if (targetAdjustment === null || targetAdjustment === currentAdjustment) continue;
+
+        // Determine confidence
+        let confidence = 'Low';
+        if (clicks >= 200) confidence = 'Extreme';
+        else if (clicks >= 100) confidence = 'High';
+        else if (clicks >= 50) confidence = 'Good';
+        else if (clicks >= MIN_CLICKS) confidence = 'OK';
+
+        const action = acos > targetAcos ? 'decrease' : 'increase';
+
+        recommendations.push({
+          campaignId: p.campaign_id,
+          campaignName: p.campaign_name,
+          placement: p.placement,
+          biddingStrategy: 'N/A',
+          currentAdjustment,
+          recommendedAdjustment: targetAdjustment,
+          change: targetAdjustment - currentAdjustment,
+          clicks,
+          cost,
+          sales,
+          acos: acos === 999 ? null : acos / 100,
+          targetAcos: campaignTarget.target,
+          confidence,
+          reason: `Placement ACOS (${acos === 999 ? 'No Sales' : acos.toFixed(1) + '%'}) ${action === 'decrease' ? 'exceeds' : 'below'} target range (${(targetAcos - ACOS_WINDOW).toFixed(0)}%-${(targetAcos + ACOS_WINDOW).toFixed(0)}%)`
+        });
+      }
+
+      await sqlClient.end();
+
+      res.json({
+        country,
+        total_recommendations: recommendations.length,
+        recommendations: recommendations.slice(0, 200)
+      });
+    } catch (error: any) {
+      console.error('Placement bidding strategy error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Mark recommendation as implemented
   app.post("/api/recommendation/:id/implement", async (req, res) => {
     try {
@@ -2680,6 +2800,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
             pre_acos_365d: rec.d365Acos,
             pre_acos_lifetime: rec.lifetimeAcos,
             pre_clicks_lifetime: rec.totalClicks,
+            confidence: rec.confidence,
+            reason: rec.reason
+          }));
+        }
+      }
+
+      // If no placement recommendations in history, fetch live from placement-bidding-strategy API
+      if (placementRecs.length === 0) {
+        const host = req.get('host') || 'localhost:5000';
+        const protocol = req.protocol || 'http';
+        const placementUrl = campaignIdFilter 
+          ? `${protocol}://${host}/api/placement-bidding-strategy?country=${countryStr}&campaignId=${campaignIdFilter}`
+          : `${protocol}://${host}/api/placement-bidding-strategy?country=${countryStr}`;
+        
+        const placementResponse = await fetch(placementUrl);
+        if (placementResponse.ok) {
+          const placementData = await placementResponse.json();
+          // Convert placement-bidding-strategy format to recommendation format
+          placementRecs = (placementData.recommendations || []).map((rec: any) => ({
+            country: countryStr,
+            campaign_id: rec.campaignId,
+            campaign_name: rec.campaignName,
+            targeting: rec.placement,
+            match_type: rec.biddingStrategy,
+            old_value: rec.currentAdjustment,
+            recommended_value: rec.recommendedAdjustment,
+            weighted_acos: rec.acos,
+            acos_target: rec.targetAcos,
+            pre_clicks_lifetime: rec.clicks,
             confidence: rec.confidence,
             reason: rec.reason
           }));
