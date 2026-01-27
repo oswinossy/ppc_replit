@@ -835,7 +835,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(productPlacement)
         .where(conditions.length > 0 ? and(...conditions) : undefined);
 
-      // Fetch latest bid adjustments from "Bid Adjustments" table for this campaign
+      // Fetch latest bid adjustments from "Bid_Adjustments" table for this campaign
       let bidAdjustmentsMap = new Map<string, number>();
       if (campaignId) {
         const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
@@ -844,7 +844,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const bidAdjustments = await sqlClient`
             SELECT DISTINCT ON (placement)
               placement, percent
-            FROM "Bid Adjustments"
+            FROM "Bid_Adjustments"
             WHERE "CampaignId"::text = ${campaignId as string}
             ORDER BY placement, created_at DESC
           `;
