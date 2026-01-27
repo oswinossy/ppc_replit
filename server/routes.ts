@@ -2610,16 +2610,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           continue;
         }
 
-        // Calculate target bid adjustment
+        // Calculate target bid adjustment (never below 0%)
         let targetAdjustment: number | null = null;
         
         if (acos !== 999 && acos > 0) {
           const multiplier = targetAcos / acos;
           const adjustmentChange = Math.round((multiplier - 1) * 50);
-          targetAdjustment = Math.max(-90, Math.min(900, currentAdjustment + adjustmentChange));
+          targetAdjustment = Math.max(0, Math.min(900, currentAdjustment + adjustmentChange));
           targetAdjustment = Math.round(targetAdjustment / 5) * 5;
         } else if (acos === 999) {
-          targetAdjustment = Math.max(-90, currentAdjustment - 25);
+          targetAdjustment = Math.max(0, currentAdjustment - 25);
           targetAdjustment = Math.round(targetAdjustment / 5) * 5;
         }
         
@@ -2882,11 +2882,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'Lifetime ACOS': rec.pre_acos_lifetime != null ? `${Math.round(Number(rec.pre_acos_lifetime) * 100)}%` : 'N/A',
           'Lifetime Clicks': Number(rec.pre_clicks_lifetime) || 0,
           'Confidence': rec.confidence || '',
-          'Timeframes Used': timeframesUsed.join(', ') || 'None',
-          'T0 Weight': `${t0WeightPct}%`,
-          '30D Weight': `${d30WeightPct}%`,
-          '365D Weight': `${d365WeightPct}%`,
-          'Lifetime Weight': `${lifetimeWeightPct}%`,
           'Reason': rec.reason || ''
         };
       });
@@ -2895,15 +2890,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const placementData = (placementRecs as any[]).map((rec: any) => {
         const hasBoth = campaignsWithKeywords.has(rec.campaign_id);
         
+        // Ensure recommended adjustment is never below 0%
+        const recommendedAdj = Math.max(0, Number(rec.recommended_value) || 0);
+        const currentAdj = Number(rec.old_value) || 0;
+        const change = recommendedAdj - currentAdj;
+        
         return {
           'NEEDS BOTH ADJUSTMENTS': hasBoth ? 'YES - ALSO CHECK KEYWORDS' : '',
           'Country': rec.country,
           'Campaign Name': rec.campaign_name,
           'Placement': rec.targeting,
           'Bidding Strategy': rec.match_type || 'N/A',
-          'Current Adjustment': `${rec.old_value || 0}%`,
-          'Recommended Adjustment': `${rec.recommended_value || 0}%`,
-          'Change': `${(rec.recommended_value || 0) - (rec.old_value || 0) > 0 ? '+' : ''}${(rec.recommended_value || 0) - (rec.old_value || 0)}%`,
+          'Current Adjustment': `${currentAdj}%`,
+          'Recommended Adjustment': `${recommendedAdj}%`,
+          'Change': `${change > 0 ? '+' : ''}${change}%`,
           'Clicks': rec.pre_clicks_lifetime || 0,
           'ACOS': rec.weighted_acos ? `${Math.round(rec.weighted_acos * 100)}%` : 'N/A',
           'Target ACOS': `${Math.round((rec.acos_target || 0) * 100)}%`,
@@ -3042,11 +3042,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'Confidence': rec.confidence,
           'Days Since Change': rec.days_since_change,
           'Reason': rec.reason,
-          'Timeframes Used': timeframesUsed.join(', ') || 'None',
-          'T0 Weight': `${t0WeightPct}%`,
-          '30D Weight': `${d30WeightPct}%`,
-          '365D Weight': `${d365WeightPct}%`,
-          'Lifetime Weight': `${lifetimeWeightPct}%`,
           'Has Placement Recs': rec.hasPlacementRecs ? 'YES - NEEDS BOTH ADJUSTMENTS' : 'No'
         };
       });
@@ -3193,11 +3188,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'Lifetime ACOS': rec.lifetime_acos ? `${Math.round(rec.lifetime_acos * 100)}%` : 'N/A',
           'Confidence': rec.confidence,
           'Days Since Change': rec.days_since_change,
-          'Timeframes Used': timeframesUsed.join(', ') || 'None',
-          'T0 Weight': `${t0WeightPct}%`,
-          '30D Weight': `${d30WeightPct}%`,
-          '365D Weight': `${d365WeightPct}%`,
-          'Lifetime Weight': `${lifetimeWeightPct}%`,
           'Has Placement Recs': rec.hasPlacementRecs ? 'YES' : 'No'
         };
       });

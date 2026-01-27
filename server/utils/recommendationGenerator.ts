@@ -293,7 +293,7 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
         continue; // Within acceptable range, no adjustment needed
       }
 
-      // Calculate target bid adjustment based on ACOS performance
+      // Calculate target bid adjustment based on ACOS performance (never below 0%)
       let targetAdjustment: number | null = null;
       
       if (acos !== 999 && acos > 0) {
@@ -304,13 +304,13 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
         // If ACOS is 2x target, we reduce adjustment by 50%
         // If ACOS is 0.5x target, we increase adjustment by 50%
         const adjustmentChange = Math.round((multiplier - 1) * 50);
-        targetAdjustment = Math.max(-90, Math.min(900, currentAdjustment + adjustmentChange));
+        targetAdjustment = Math.max(0, Math.min(900, currentAdjustment + adjustmentChange));
         
         // Round to nearest 5%
         targetAdjustment = Math.round(targetAdjustment / 5) * 5;
       } else if (acos === 999) {
         // High clicks, no sales - reduce adjustment significantly
-        targetAdjustment = Math.max(-90, currentAdjustment - 25);
+        targetAdjustment = Math.max(0, currentAdjustment - 25);
         targetAdjustment = Math.round(targetAdjustment / 5) * 5;
       }
       
