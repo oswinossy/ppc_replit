@@ -59,6 +59,14 @@ export async function createRecommendationHistoryTable(): Promise<void> {
         pre_clicks_30d INTEGER,
         pre_clicks_365d INTEGER,
         pre_clicks_lifetime INTEGER,
+        pre_cost_t0 NUMERIC,
+        pre_cost_30d NUMERIC,
+        pre_cost_365d NUMERIC,
+        pre_cost_lifetime NUMERIC,
+        pre_orders_t0 INTEGER,
+        pre_orders_30d INTEGER,
+        pre_orders_365d INTEGER,
+        pre_orders_lifetime INTEGER,
         weighted_acos NUMERIC,
         acos_target NUMERIC,
         confidence TEXT,
@@ -86,6 +94,31 @@ export async function createRecommendationHistoryTable(): Promise<void> {
     `;
     
     console.log('recommendation_history table created/verified with indexes');
+    
+    // Add new columns if they don't exist (for existing tables)
+    const newColumns = [
+      'pre_cost_t0 NUMERIC',
+      'pre_cost_30d NUMERIC',
+      'pre_cost_365d NUMERIC',
+      'pre_cost_lifetime NUMERIC',
+      'pre_orders_t0 INTEGER',
+      'pre_orders_30d INTEGER',
+      'pre_orders_365d INTEGER',
+      'pre_orders_lifetime INTEGER'
+    ];
+    
+    for (const col of newColumns) {
+      const colName = col.split(' ')[0];
+      try {
+        await sql`ALTER TABLE "recommendation_history" ADD COLUMN IF NOT EXISTS ${sql.unsafe(col)}`;
+      } catch (e: any) {
+        // Column may already exist
+        if (!e.message?.includes('already exists')) {
+          console.log(`Note: Column ${colName} may already exist`);
+        }
+      }
+    }
+    console.log('recommendation_history new columns verified');
   } finally {
     await sql.end();
   }
@@ -173,6 +206,14 @@ export async function saveRecommendation(rec: {
   pre_clicks_30d?: number;
   pre_clicks_365d?: number;
   pre_clicks_lifetime?: number;
+  pre_cost_t0?: number;
+  pre_cost_30d?: number;
+  pre_cost_365d?: number;
+  pre_cost_lifetime?: number;
+  pre_orders_t0?: number;
+  pre_orders_30d?: number;
+  pre_orders_365d?: number;
+  pre_orders_lifetime?: number;
   weighted_acos?: number;
   acos_target?: number;
   confidence?: string;
@@ -188,6 +229,8 @@ export async function saveRecommendation(rec: {
         targeting, match_type, recommendation_type, placement, linked_group_id,
         old_value, recommended_value, pre_acos_t0, pre_acos_30d, pre_acos_365d,
         pre_acos_lifetime, pre_clicks_t0, pre_clicks_30d, pre_clicks_365d, pre_clicks_lifetime,
+        pre_cost_t0, pre_cost_30d, pre_cost_365d, pre_cost_lifetime,
+        pre_orders_t0, pre_orders_30d, pre_orders_365d, pre_orders_lifetime,
         weighted_acos, acos_target, confidence, reason
       )
       VALUES (
@@ -195,6 +238,8 @@ export async function saveRecommendation(rec: {
         ${rec.targeting}, ${rec.match_type || null}, ${rec.recommendation_type}, ${rec.placement || null}, ${rec.linked_group_id || null},
         ${rec.old_value || null}, ${rec.recommended_value || null}, ${rec.pre_acos_t0 || null}, ${rec.pre_acos_30d || null}, ${rec.pre_acos_365d || null},
         ${rec.pre_acos_lifetime || null}, ${rec.pre_clicks_t0 || null}, ${rec.pre_clicks_30d || null}, ${rec.pre_clicks_365d || null}, ${rec.pre_clicks_lifetime || null},
+        ${rec.pre_cost_t0 || null}, ${rec.pre_cost_30d || null}, ${rec.pre_cost_365d || null}, ${rec.pre_cost_lifetime || null},
+        ${rec.pre_orders_t0 || null}, ${rec.pre_orders_30d || null}, ${rec.pre_orders_365d || null}, ${rec.pre_orders_lifetime || null},
         ${rec.weighted_acos || null}, ${rec.acos_target || null}, ${rec.confidence || null}, ${rec.reason || null}
       )
       RETURNING id
