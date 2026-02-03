@@ -63,10 +63,10 @@ export async function createRecommendationHistoryTable(): Promise<void> {
         pre_cost_30d NUMERIC,
         pre_cost_365d NUMERIC,
         pre_cost_lifetime NUMERIC,
-        pre_orders_t0 INTEGER,
-        pre_orders_30d INTEGER,
-        pre_orders_365d INTEGER,
-        pre_orders_lifetime INTEGER,
+        pre_orders_t0 NUMERIC,
+        pre_orders_30d NUMERIC,
+        pre_orders_365d NUMERIC,
+        pre_orders_lifetime NUMERIC,
         weighted_acos NUMERIC,
         acos_target NUMERIC,
         confidence TEXT,
@@ -96,15 +96,16 @@ export async function createRecommendationHistoryTable(): Promise<void> {
     console.log('recommendation_history table created/verified with indexes');
     
     // Add new columns if they don't exist (for existing tables)
+    // Using NUMERIC for orders as source data may have decimals due to aggregation
     const newColumns = [
       'pre_cost_t0 NUMERIC',
       'pre_cost_30d NUMERIC',
       'pre_cost_365d NUMERIC',
       'pre_cost_lifetime NUMERIC',
-      'pre_orders_t0 INTEGER',
-      'pre_orders_30d INTEGER',
-      'pre_orders_365d INTEGER',
-      'pre_orders_lifetime INTEGER'
+      'pre_orders_t0 NUMERIC',
+      'pre_orders_30d NUMERIC',
+      'pre_orders_365d NUMERIC',
+      'pre_orders_lifetime NUMERIC'
     ];
     
     for (const col of newColumns) {
@@ -116,6 +117,17 @@ export async function createRecommendationHistoryTable(): Promise<void> {
         if (!e.message?.includes('already exists')) {
           console.log(`Note: Column ${colName} may already exist`);
         }
+      }
+    }
+    
+    // Ensure orders columns are NUMERIC (fix for INTEGER columns that need to store decimals)
+    const ordersColumns = ['pre_orders_t0', 'pre_orders_30d', 'pre_orders_365d', 'pre_orders_lifetime'];
+    for (const colName of ordersColumns) {
+      try {
+        await sql`ALTER TABLE "recommendation_history" ALTER COLUMN ${sql.unsafe(colName)} TYPE NUMERIC USING ${sql.unsafe(colName)}::NUMERIC`;
+      } catch (e: any) {
+        // Column may already be NUMERIC
+        console.log(`Note: Column ${colName} type check: ${e.message?.substring(0, 50)}`);
       }
     }
     console.log('recommendation_history new columns verified');
