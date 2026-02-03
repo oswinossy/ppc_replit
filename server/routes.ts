@@ -2863,6 +2863,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const acosTarget = Number(rec.acos_target) || 0;
         const weightedAcos = Number(rec.weighted_acos) || 0;
         
+        // Calculate CPC values (Cost Per Click)
+        const calcCpc = (cost: number | null, clicks: number | null) => {
+          if (cost === null || clicks === null || clicks === 0) return null;
+          return Number(cost) / Number(clicks);
+        };
+        
+        const d30Clicks = Number(rec.pre_clicks_30d) || 0;
+        const d30Cost = Number(rec.pre_cost_30d) || 0;
+        const d30Orders = Number(rec.pre_orders_30d) || 0;
+        const d30Cpc = calcCpc(d30Cost, d30Clicks);
+        
+        const t0Clicks = Number(rec.pre_clicks_t0) || 0;
+        const t0Cost = Number(rec.pre_cost_t0) || 0;
+        const t0Orders = Number(rec.pre_orders_t0) || 0;
+        const t0Cpc = calcCpc(t0Cost, t0Clicks);
+        
+        const d365Clicks = Number(rec.pre_clicks_365d) || 0;
+        const d365Cost = Number(rec.pre_cost_365d) || 0;
+        const d365Orders = Number(rec.pre_orders_365d) || 0;
+        const d365Cpc = calcCpc(d365Cost, d365Clicks);
+        
+        const lifetimeClicks = Number(rec.pre_clicks_lifetime) || 0;
+        const lifetimeCost = Number(rec.pre_cost_lifetime) || 0;
+        const lifetimeOrders = Number(rec.pre_orders_lifetime) || 0;
+        const lifetimeCpc = calcCpc(lifetimeCost, lifetimeClicks);
+        
         return {
           'NEEDS BOTH ADJUSTMENTS': hasBoth ? 'YES - ALSO CHECK PLACEMENTS' : '',
           'Country': rec.country,
@@ -2876,12 +2902,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'Action': newVal > oldVal ? 'increase' : 'decrease',
           'ACOS Target': `${Math.round(acosTarget * 100)}%`,
           'Weighted ACOS': `${Math.round(weightedAcos * 100)}%`,
-          'T0 ACOS': rec.pre_acos_t0 != null ? `${Math.round(Number(rec.pre_acos_t0) * 100)}%` : 'N/A',
-          '30D ACOS': rec.pre_acos_30d != null ? `${Math.round(Number(rec.pre_acos_30d) * 100)}%` : 'N/A',
-          '365D ACOS': rec.pre_acos_365d != null ? `${Math.round(Number(rec.pre_acos_365d) * 100)}%` : 'N/A',
-          'Lifetime ACOS': rec.pre_acos_lifetime != null ? `${Math.round(Number(rec.pre_acos_lifetime) * 100)}%` : 'N/A',
-          'Lifetime Clicks': Number(rec.pre_clicks_lifetime) || 0,
           'Confidence': rec.confidence || '',
+          '30D Clicks': d30Clicks,
+          '30D CPC': d30Cpc !== null ? `€${d30Cpc.toFixed(2)}` : 'N/A',
+          '30D Spend': `€${d30Cost.toFixed(2)}`,
+          '30D Orders': d30Orders,
+          '30D ACOS': rec.pre_acos_30d != null ? `${Math.round(Number(rec.pre_acos_30d) * 100)}%` : 'N/A',
+          'T0 Clicks': t0Clicks,
+          'T0 CPC': t0Cpc !== null ? `€${t0Cpc.toFixed(2)}` : 'N/A',
+          'T0 Spend': `€${t0Cost.toFixed(2)}`,
+          'T0 Orders': t0Orders,
+          'T0 ACOS': rec.pre_acos_t0 != null ? `${Math.round(Number(rec.pre_acos_t0) * 100)}%` : 'N/A',
+          '365D Clicks': d365Clicks,
+          '365D CPC': d365Cpc !== null ? `€${d365Cpc.toFixed(2)}` : 'N/A',
+          '365D Spend': `€${d365Cost.toFixed(2)}`,
+          '365D Orders': d365Orders,
+          '365D ACOS': rec.pre_acos_365d != null ? `${Math.round(Number(rec.pre_acos_365d) * 100)}%` : 'N/A',
+          'Lifetime Clicks': lifetimeClicks,
+          'Lifetime CPC': lifetimeCpc !== null ? `€${lifetimeCpc.toFixed(2)}` : 'N/A',
+          'Lifetime Spend': `€${lifetimeCost.toFixed(2)}`,
+          'Lifetime Orders': lifetimeOrders,
+          'Lifetime ACOS': rec.pre_acos_lifetime != null ? `${Math.round(Number(rec.pre_acos_lifetime) * 100)}%` : 'N/A',
           'Reason': rec.reason || ''
         };
       });
