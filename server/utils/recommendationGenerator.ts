@@ -114,12 +114,15 @@ async function generateKeywordRecommendationsForCountry(country: string, connect
         SUM(CASE WHEN date >= ${d365AgoStr} THEN clicks ELSE 0 END) as d365_clicks,
         SUM(CASE WHEN date >= ${d365AgoStr} THEN cost ELSE 0 END) as d365_cost,
         SUM(CASE WHEN date >= ${d365AgoStr} THEN sales ELSE 0 END) as d365_sales,
+        SUM(CASE WHEN date >= ${d365AgoStr} THEN orders ELSE 0 END) as d365_orders,
         SUM(CASE WHEN date >= ${d30AgoStr} THEN clicks ELSE 0 END) as d30_clicks,
         SUM(CASE WHEN date >= ${d30AgoStr} THEN cost ELSE 0 END) as d30_cost,
         SUM(CASE WHEN date >= ${d30AgoStr} THEN sales ELSE 0 END) as d30_sales,
+        SUM(CASE WHEN date >= ${d30AgoStr} THEN orders ELSE 0 END) as d30_orders,
         SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN clicks ELSE 0 END) as t0_clicks,
         SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN cost ELSE 0 END) as t0_cost,
-        SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN sales ELSE 0 END) as t0_sales
+        SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN sales ELSE 0 END) as t0_sales,
+        SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN orders ELSE 0 END) as t0_orders
       FROM keyword_base
       GROUP BY campaign_id, campaign_name, ad_group_id, ad_group_name, targeting, match_type
       HAVING SUM(clicks) >= 30
@@ -216,6 +219,14 @@ async function generateKeywordRecommendationsForCountry(country: string, connect
         pre_clicks_30d: Number(kw.d30_clicks),
         pre_clicks_365d: Number(kw.d365_clicks),
         pre_clicks_lifetime: totalClicks,
+        pre_cost_t0: t0Cost,
+        pre_cost_30d: Number(kw.d30_cost),
+        pre_cost_365d: Number(kw.d365_cost),
+        pre_cost_lifetime: Number(kw.lifetime_cost),
+        pre_orders_t0: Number(kw.t0_orders),
+        pre_orders_30d: Number(kw.d30_orders),
+        pre_orders_365d: Number(kw.d365_orders),
+        pre_orders_lifetime: Number(kw.lifetime_orders),
         weighted_acos: weightedAcos,
         acos_target: targetAcos,
         confidence,
