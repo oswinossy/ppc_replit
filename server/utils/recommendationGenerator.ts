@@ -261,7 +261,6 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
     }
 
     // Query placement data grouped by campaign (minimum 30 clicks same as keywords)
-    // Note: placementBidAdjustment and campaignBiddingStrategy not available in raw data
     const placementData = await sqlClient`
       SELECT 
         "campaignId" as campaign_id,
@@ -280,7 +279,44 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
       ORDER BY SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) DESC
     `;
 
+    // Query current bid adjustments from Bid_Adjustments table
+    // Map placement names from Bid_Adjustments to s_products_placement placement names
+    const bidAdjustmentPlacementMap: Record<string, string> = {
+      'Placement Top': 'Top of search (first page)',
+      'Placement Product Page': 'Product pages',
+      'Placement Rest Of Search': 'Rest of search',
+      'Site Amazon Business': 'Amazon Business'
+    };
+    
+    const bidAdjustmentsData = await sqlClient`
+      SELECT DISTINCT ON (name, placement)
+        name as campaign_name,
+        placement,
+        percent
+      FROM "Bid_Adjustments"
+      WHERE country = ${country}
+      ORDER BY name, placement, created_at DESC
+    `;
+    
+    // Build lookup map: campaign_name + normalized_placement -> percent
+    const currentAdjustmentsMap = new Map<string, number>();
+    for (const row of bidAdjustmentsData) {
+      const normalizedPlacement = bidAdjustmentPlacementMap[row.placement as string];
+      if (normalizedPlacement && row.campaign_name) {
+        const key = `${row.campaign_name}|${normalizedPlacement}`;
+        currentAdjustmentsMap.set(key, Number(row.percent ?? 0));
+      }
+    }
+    console.log(`[Placements] Found ${bidAdjustmentsData.length} bid adjustments from Bid_Adjustments table for ${country}, ${currentAdjustmentsMap.size} mapped to placements`);
+    
+    // Debug: Sample campaign names from both sources
+    const samplePlacementNames = placementData.slice(0, 3).map((p: any) => p.campaign_name);
+    const sampleBidAdjKeys = Array.from(currentAdjustmentsMap.keys()).slice(0, 3);
+    console.log(`[Placements] Sample placement campaign names: ${JSON.stringify(samplePlacementNames)}`);
+    console.log(`[Placements] Sample bid adj keys: ${JSON.stringify(sampleBidAdjKeys)}`);
+
     let savedCount = 0;
+    let matchedCount = 0;
 
     for (const p of placementData) {
       const campaignTarget = acosTargetsMap.get(p.campaign_id);
@@ -290,7 +326,11 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
       const clicks = Number(p.clicks);
       const cost = Number(p.cost);
       const sales = Number(p.sales);
-      const currentAdjustment = 0; // Default - actual value not in raw data
+      
+      // Look up current adjustment from Bid_Adjustments table using campaign name (default 0 if not found)
+      const placementKey = `${p.campaign_name}|${p.placement}`;
+      const currentAdjustment = currentAdjustmentsMap.get(placementKey) ?? 0;
+      if (currentAdjustmentsMap.has(placementKey)) matchedCount++;
       
       if (clicks < MIN_CLICKS) continue;
       
@@ -348,7 +388,7 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
         recommended_value: targetAdjustment,
         weighted_acos: acos / 100, // Store as decimal
         acos_target: campaignTarget.target,
-        pre_clicks_lifetime: clicks,
+        pre_clicks_lifetime: Math.round(clicks),
         confidence,
         reason: `Placement ACOS (${acos === 999 ? 'No Sales' : acos.toFixed(1) + '%'}) ${action === 'decrease' ? 'exceeds' : 'below'} target range (${(targetAcos - ACOS_WINDOW).toFixed(0)}%-${(targetAcos + ACOS_WINDOW).toFixed(0)}%). Adjust from ${currentAdjustment}% to ${targetAdjustment}%`
       });
@@ -356,6 +396,7 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
       savedCount++;
     }
 
+    console.log(`[Placements] ${matchedCount} placements matched with bid adjustments, ${savedCount} recommendations saved`);
     return savedCount;
   } finally {
     await sqlClient.end();

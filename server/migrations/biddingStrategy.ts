@@ -248,11 +248,11 @@ export async function saveRecommendation(rec: {
       VALUES (
         ${rec.country}, ${rec.campaign_id}, ${rec.campaign_name || null}, ${rec.ad_group_id || null}, ${rec.ad_group_name || null},
         ${rec.targeting}, ${rec.match_type || null}, ${rec.recommendation_type}, ${rec.placement || null}, ${rec.linked_group_id || null},
-        ${rec.old_value || null}, ${rec.recommended_value || null}, ${rec.pre_acos_t0 || null}, ${rec.pre_acos_30d || null}, ${rec.pre_acos_365d || null},
-        ${rec.pre_acos_lifetime || null}, ${rec.pre_clicks_t0 || null}, ${rec.pre_clicks_30d || null}, ${rec.pre_clicks_365d || null}, ${rec.pre_clicks_lifetime || null},
-        ${rec.pre_cost_t0 || null}, ${rec.pre_cost_30d || null}, ${rec.pre_cost_365d || null}, ${rec.pre_cost_lifetime || null},
-        ${rec.pre_orders_t0 || null}, ${rec.pre_orders_30d || null}, ${rec.pre_orders_365d || null}, ${rec.pre_orders_lifetime || null},
-        ${rec.weighted_acos || null}, ${rec.acos_target || null}, ${rec.confidence || null}, ${rec.reason || null}
+        ${rec.old_value ?? null}, ${rec.recommended_value ?? null}, ${rec.pre_acos_t0 ?? null}, ${rec.pre_acos_30d ?? null}, ${rec.pre_acos_365d ?? null},
+        ${rec.pre_acos_lifetime ?? null}, ${rec.pre_clicks_t0 ?? null}, ${rec.pre_clicks_30d ?? null}, ${rec.pre_clicks_365d ?? null}, ${rec.pre_clicks_lifetime ?? null},
+        ${rec.pre_cost_t0 ?? null}, ${rec.pre_cost_30d ?? null}, ${rec.pre_cost_365d ?? null}, ${rec.pre_cost_lifetime ?? null},
+        ${rec.pre_orders_t0 ?? null}, ${rec.pre_orders_30d ?? null}, ${rec.pre_orders_365d ?? null}, ${rec.pre_orders_lifetime ?? null},
+        ${rec.weighted_acos ?? null}, ${rec.acos_target ?? null}, ${rec.confidence || null}, ${rec.reason || null}
       )
       RETURNING id
     `;
