@@ -280,7 +280,7 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
     `;
 
     // Query current bid adjustments from Bid_Adjustments table
-    // Map placement names from Bid_Adjustments to s_products_placement placement names
+    // Map placement names from Bid_Adjustments to normalized placement names
     const bidAdjustmentPlacementMap: Record<string, string> = {
       'Placement Top': 'Top of search (first page)',
       'Placement Product Page': 'Product pages',
@@ -288,31 +288,38 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
       'Site Amazon Business': 'Amazon Business'
     };
     
+    // Map placementClassification values (from s_products_placement) to normalized placement names
+    const placementClassificationMap: Record<string, string> = {
+      'Top of Search on-Amazon': 'Top of search (first page)',
+      'Detail Page on-Amazon': 'Product pages',
+      'Other on-Amazon': 'Rest of search'
+    };
+    
     const bidAdjustmentsData = await sqlClient`
-      SELECT DISTINCT ON (name, placement)
-        name as campaign_name,
+      SELECT DISTINCT ON ("CampaignId", placement)
+        "CampaignId"::text as campaign_id,
         placement,
         percent
       FROM "Bid_Adjustments"
       WHERE country = ${country}
-      ORDER BY name, placement, created_at DESC
+      ORDER BY "CampaignId", placement, created_at DESC
     `;
     
-    // Build lookup map: campaign_name + normalized_placement -> percent
+    // Build lookup map: campaign_id + normalized_placement -> percent
     const currentAdjustmentsMap = new Map<string, number>();
     for (const row of bidAdjustmentsData) {
       const normalizedPlacement = bidAdjustmentPlacementMap[row.placement as string];
-      if (normalizedPlacement && row.campaign_name) {
-        const key = `${row.campaign_name}|${normalizedPlacement}`;
+      if (normalizedPlacement && row.campaign_id) {
+        const key = `${row.campaign_id}|${normalizedPlacement}`;
         currentAdjustmentsMap.set(key, Number(row.percent ?? 0));
       }
     }
     console.log(`[Placements] Found ${bidAdjustmentsData.length} bid adjustments from Bid_Adjustments table for ${country}, ${currentAdjustmentsMap.size} mapped to placements`);
     
-    // Debug: Sample campaign names from both sources
-    const samplePlacementNames = placementData.slice(0, 3).map((p: any) => p.campaign_name);
-    const sampleBidAdjKeys = Array.from(currentAdjustmentsMap.keys()).slice(0, 3);
-    console.log(`[Placements] Sample placement campaign names: ${JSON.stringify(samplePlacementNames)}`);
+    // Debug: Sample campaign IDs from both sources
+    const samplePlacementIds = placementData.slice(0, 5).map((p: any) => p.campaign_id);
+    const sampleBidAdjKeys = Array.from(currentAdjustmentsMap.keys()).slice(0, 5);
+    console.log(`[Placements] Sample placement campaign IDs: ${JSON.stringify(samplePlacementIds)}`);
     console.log(`[Placements] Sample bid adj keys: ${JSON.stringify(sampleBidAdjKeys)}`);
 
     let savedCount = 0;
@@ -327,8 +334,11 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
       const cost = Number(p.cost);
       const sales = Number(p.sales);
       
-      // Look up current adjustment from Bid_Adjustments table using campaign name (default 0 if not found)
-      const placementKey = `${p.campaign_name}|${p.placement}`;
+      // Map placementClassification to normalized placement name for lookup
+      const normalizedPlacement = placementClassificationMap[p.placement as string] ?? p.placement;
+      
+      // Look up current adjustment from Bid_Adjustments table using campaign_id + normalized placement
+      const placementKey = `${p.campaign_id}|${normalizedPlacement}`;
       const currentAdjustment = currentAdjustmentsMap.get(placementKey) ?? 0;
       if (currentAdjustmentsMap.has(placementKey)) matchedCount++;
       
