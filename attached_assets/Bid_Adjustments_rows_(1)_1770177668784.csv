@@ -1,0 +1,4 @@
+created_at,CampaignId,name,state,portfolioId,startDate,budget,budgetType,biddingStrategy,placement,percent,id,country
+2026-01-26 08:07:43.602154+00,28798536341341,Books AUTO,Enabled,51115655977058,2023-01-15,15,Daily,Legacy For Sales,Placement Rest Of Search,20,2710,IT
+2026-01-26 08:07:43.602154+00,28798536341341,Books AUTO,Enabled,51115655977058,2023-01-15,15,Daily,Legacy For Sales,Placement Top,25,2711,IT
+2026-01-26 08:07:43.602154+00,28798536341341,Books AUTO,Enabled,51115655977058,2023-01-15,15,Daily,Legacy For Sales,Site Amazon Business,35,2712,IT
