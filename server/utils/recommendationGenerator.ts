@@ -325,6 +325,21 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
     let savedCount = 0;
     let matchedCount = 0;
 
+    // Collect recommendations per campaign before saving (to enforce "at least one 0%" rule)
+    interface PlacementRec {
+      campaign_id: string;
+      campaign_name: string;
+      placement: string;
+      currentAdjustment: number;
+      targetAdjustment: number;
+      acos: number;
+      targetAcos: number;
+      clicks: number;
+      confidence: string;
+      action: string;
+    }
+    const campaignRecommendations = new Map<string, PlacementRec[]>();
+
     for (const p of placementData) {
       const campaignTarget = acosTargetsMap.get(p.campaign_id);
       if (!campaignTarget) continue;
@@ -387,23 +402,70 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
 
       const action = acos > targetAcos ? 'decrease' : 'increase';
 
-      await saveRecommendation({
-        country,
+      // Collect recommendation for this campaign
+      const rec: PlacementRec = {
         campaign_id: p.campaign_id,
         campaign_name: p.campaign_name,
-        targeting: p.placement,
-        match_type: 'placement',
-        recommendation_type: 'placement_adjustment',
-        old_value: currentAdjustment,
-        recommended_value: targetAdjustment,
-        weighted_acos: acos / 100, // Store as decimal
-        acos_target: campaignTarget.target,
-        pre_clicks_lifetime: Math.round(clicks),
+        placement: p.placement,
+        currentAdjustment,
+        targetAdjustment,
+        acos,
+        targetAcos,
+        clicks,
         confidence,
-        reason: `Placement ACOS (${acos === 999 ? 'No Sales' : acos.toFixed(1) + '%'}) ${action === 'decrease' ? 'exceeds' : 'below'} target range (${(targetAcos - ACOS_WINDOW).toFixed(0)}%-${(targetAcos + ACOS_WINDOW).toFixed(0)}%). Adjust from ${currentAdjustment}% to ${targetAdjustment}%`
-      });
+        action
+      };
+
+      if (!campaignRecommendations.has(p.campaign_id)) {
+        campaignRecommendations.set(p.campaign_id, []);
+      }
+      campaignRecommendations.get(p.campaign_id)!.push(rec);
+    }
+
+    // Process each campaign's recommendations and enforce "at least one 0%" rule
+    for (const [campaignId, recs] of Array.from(campaignRecommendations.entries())) {
+      // Check if all recommendations for this campaign have > 0% target adjustment
+      const allAboveZero = recs.every((r: PlacementRec) => r.targetAdjustment > 0);
       
-      savedCount++;
+      if (allAboveZero && recs.length >= 3) {
+        // Find the recommendation with the lowest target adjustment and force it to 0%
+        // Rule: If all 3 placements have > 0% recommendations, one must be 0% (keyword bids too low)
+        let lowestIdx = 0;
+        for (let i = 1; i < recs.length; i++) {
+          if (recs[i].targetAdjustment < recs[lowestIdx].targetAdjustment) {
+            lowestIdx = i;
+          }
+        }
+        recs[lowestIdx].targetAdjustment = 0;
+        console.log(`[Placements] Campaign ${campaignId}: Forced ${recs[lowestIdx].placement} to 0% (all placements had > 0% - keyword bids may be too low)`);
+      }
+
+      // Save all recommendations for this campaign
+      for (const rec of recs) {
+        // Skip if adjustment ended up the same as current after the 0% rule
+        if (rec.targetAdjustment === rec.currentAdjustment) continue;
+
+        const wasForced = allAboveZero && recs.length >= 3 && rec.targetAdjustment === 0;
+        const reasonSuffix = wasForced ? ' [Forced to 0% - consider increasing keyword bids]' : '';
+
+        await saveRecommendation({
+          country,
+          campaign_id: rec.campaign_id,
+          campaign_name: rec.campaign_name,
+          targeting: rec.placement,
+          match_type: 'placement',
+          recommendation_type: 'placement_adjustment',
+          old_value: rec.currentAdjustment,
+          recommended_value: rec.targetAdjustment,
+          weighted_acos: rec.acos / 100, // Store as decimal
+          acos_target: rec.targetAcos / 100,
+          pre_clicks_lifetime: Math.round(rec.clicks),
+          confidence: rec.confidence,
+          reason: `Placement ACOS (${rec.acos === 999 ? 'No Sales' : rec.acos.toFixed(1) + '%'}) ${rec.action === 'decrease' ? 'exceeds' : 'below'} target range (${(rec.targetAcos - ACOS_WINDOW).toFixed(0)}%-${(rec.targetAcos + ACOS_WINDOW).toFixed(0)}%). Adjust from ${rec.currentAdjustment}% to ${rec.targetAdjustment}%${reasonSuffix}`
+        });
+        
+        savedCount++;
+      }
     }
 
     console.log(`[Placements] ${matchedCount} placements matched with bid adjustments, ${savedCount} recommendations saved`);
