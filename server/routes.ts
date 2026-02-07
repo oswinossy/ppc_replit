@@ -3353,6 +3353,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ─── Amazon Ads API routes ─────────────────────────────────────────────────
+
+  // Health check: verify Amazon Ads credentials are valid
+  app.get("/api/amazon-ads/health", async (req, res) => {
+    const { getAmazonAdsClient } = await import('./amazonAdsClient');
+    const client = getAmazonAdsClient();
+    if (!client) {
+      return res.json({ ok: false, error: 'Amazon Ads credentials not configured' });
+    }
+    const result = await client.healthCheck();
+    res.json(result);
+  });
+
+  // List available advertiser profiles (useful for finding your profile ID)
+  app.get("/api/amazon-ads/profiles", async (req, res) => {
+    const { getAmazonAdsClient } = await import('./amazonAdsClient');
+    const client = getAmazonAdsClient();
+    if (!client) {
+      return res.status(400).json({ error: 'Amazon Ads credentials not configured' });
+    }
+    try {
+      const profiles = await client.listProfiles();
+      res.json(profiles);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Manual sync trigger: pull reports from Amazon Ads API into Supabase
+  app.post("/api/amazon-ads/sync", async (req, res) => {
+    const { syncAmazonAdsData } = await import('./utils/amazonAdsSync');
+    const { startDate, endDate, country } = req.body || {};
+    try {
+      const result = await syncAmazonAdsData(startDate, endDate, country);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

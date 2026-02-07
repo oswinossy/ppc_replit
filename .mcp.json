@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "amazon-ads": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "AUTH_METHOD=direct",
+        "-e", "AMAZON_AD_API_CLIENT_ID",
+        "-e", "AMAZON_AD_API_CLIENT_SECRET",
+        "-e", "AMAZON_AD_API_PACKAGES=profiles,campaign-manage,reporting-version-3,sponsored-products,sponsored-brands-v4,sponsored-display,exports-snapshots",
+        "-p", "9080:9080",
+        "openbridge/amazon-ads-mcp"
+      ],
+      "env": {
+        "AMAZON_AD_API_CLIENT_ID": "${AMAZON_ADS_CLIENT_ID}",
+        "AMAZON_AD_API_CLIENT_SECRET": "${AMAZON_ADS_CLIENT_SECRET}"
+      }
+    }
+  }
+}
