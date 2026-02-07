@@ -3374,7 +3374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ error: 'Amazon Ads credentials not configured' });
     }
     try {
-      const profiles = await client.listProfiles();
+      const profiles = await client.listRemoteProfiles();
       res.json(profiles);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

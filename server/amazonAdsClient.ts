@@ -5,10 +5,8 @@
  * the Amazon Ads API (v3 Reporting) for Sponsored Products,
  * Sponsored Brands, and Sponsored Display campaigns.
  *
- * Prerequisites:
- *   1. Register an app at https://advertising.amazon.com/API/docs/en-us/guides/get-started/overview
- *   2. Complete OAuth authorization grant flow to obtain a refresh token
- *   3. Set the required environment variables (see .env.example)
+ * Supports multiple advertiser profiles (one per marketplace)
+ * via AMAZON_ADS_PROFILE_IDS JSON env var.
  *
  * Regional endpoints:
  *   NA: https://advertising-api.amazon.com
@@ -30,14 +28,19 @@ interface AmazonAdsConfig {
   clientId: string;
   clientSecret: string;
   refreshToken: string;
-  profileId: string;
   region: 'na' | 'eu' | 'fe';
+}
+
+export interface ProfileEntry {
+  country: string;
+  profileId: string;
 }
 
 export interface ReportRequest {
   reportType: 'spSearchTerm' | 'spPlacement' | 'sbSearchTerm' | 'sbPlacement' | 'sdMatchedTarget' | 'sdTargeting';
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD
+  profileId: string; // which profile to pull from
 }
 
 interface ReportResponse {
@@ -147,29 +150,52 @@ export class AmazonAdsClient {
   private config: AmazonAdsConfig;
   private tokens: AmazonAdsTokens | null = null;
   private baseUrl: string;
+  private profiles: ProfileEntry[];
 
   constructor() {
     const clientId = process.env.AMAZON_ADS_CLIENT_ID;
     const clientSecret = process.env.AMAZON_ADS_CLIENT_SECRET;
     const refreshToken = process.env.AMAZON_ADS_REFRESH_TOKEN;
-    const profileId = process.env.AMAZON_ADS_PROFILE_ID;
     const region = (process.env.AMAZON_ADS_REGION || 'eu') as 'na' | 'eu' | 'fe';
 
-    if (!clientId || !clientSecret || !refreshToken || !profileId) {
+    if (!clientId || !clientSecret || !refreshToken) {
       throw new Error(
         'Missing Amazon Ads credentials. Set AMAZON_ADS_CLIENT_ID, ' +
-        'AMAZON_ADS_CLIENT_SECRET, AMAZON_ADS_REFRESH_TOKEN, and AMAZON_ADS_PROFILE_ID.'
+        'AMAZON_ADS_CLIENT_SECRET, and AMAZON_ADS_REFRESH_TOKEN.'
       );
     }
 
-    this.config = { clientId, clientSecret, refreshToken, profileId, region };
+    // Parse multi-profile config: {"DE":"123","UK":"456",...}
+    const profileIdsRaw = process.env.AMAZON_ADS_PROFILE_IDS;
+    if (!profileIdsRaw) {
+      throw new Error('Missing AMAZON_ADS_PROFILE_IDS. Set it as JSON: {"DE":"123","UK":"456",...}');
+    }
+
+    try {
+      const parsed = JSON.parse(profileIdsRaw) as Record<string, string>;
+      this.profiles = Object.entries(parsed).map(([country, profileId]) => ({ country, profileId }));
+    } catch {
+      throw new Error('AMAZON_ADS_PROFILE_IDS is not valid JSON');
+    }
+
+    if (this.profiles.length === 0) {
+      throw new Error('AMAZON_ADS_PROFILE_IDS is empty');
+    }
+
+    this.config = { clientId, clientSecret, refreshToken, region };
     this.baseUrl = REGIONAL_ENDPOINTS[region];
+  }
+
+  // ── Profiles ──────────────────────────────────────────────────────────────
+
+  /** Get all configured country→profileId entries. */
+  getProfiles(): ProfileEntry[] {
+    return this.profiles;
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   private async refreshAccessToken(): Promise<string> {
-    // Return cached token if still valid (with 60s buffer)
     if (this.tokens && Date.now() < this.tokens.expires_at - 60_000) {
       return this.tokens.access_token;
     }
@@ -208,12 +234,12 @@ export class AmazonAdsClient {
     return this.tokens.access_token;
   }
 
-  private async apiHeaders(): Promise<Record<string, string>> {
+  private async apiHeaders(profileId: string): Promise<Record<string, string>> {
     const token = await this.refreshAccessToken();
     return {
       'Authorization': `Bearer ${token}`,
       'Amazon-Advertising-API-ClientId': this.config.clientId,
-      'Amazon-Advertising-API-Scope': this.config.profileId,
+      'Amazon-Advertising-API-Scope': profileId,
       'Content-Type': 'application/json',
       'Accept': 'application/json',
     };
@@ -221,21 +247,17 @@ export class AmazonAdsClient {
 
   // ── Reports (v3) ─────────────────────────────────────────────────────────
 
-  /**
-   * Request an async report from the Amazon Ads v3 Reporting API.
-   * Returns the reportId to poll for completion.
-   */
   async requestReport(req: ReportRequest): Promise<string> {
     const config = REPORT_TYPE_CONFIG[req.reportType];
     if (!config) {
       throw new Error(`Unknown report type: ${req.reportType}`);
     }
 
-    const headers = await this.apiHeaders();
+    const headers = await this.apiHeaders(req.profileId);
     const url = `${this.baseUrl}/reporting/reports`;
 
     const payload = {
-      reportDate: req.startDate, // for single-day; v3 also supports timeUnit
+      reportDate: req.startDate,
       configuration: {
         adProduct: config.adProduct,
         reportTypeId: config.recordType,
@@ -247,7 +269,7 @@ export class AmazonAdsClient {
       endDate: req.endDate,
     };
 
-    console.log(`[AmazonAds] Requesting ${req.reportType} report (${req.startDate} → ${req.endDate})...`);
+    console.log(`[AmazonAds] Requesting ${req.reportType} report for profile ${req.profileId} (${req.startDate} → ${req.endDate})...`);
 
     const resp = await fetch(url, {
       method: 'POST',
@@ -265,12 +287,8 @@ export class AmazonAdsClient {
     return data.reportId;
   }
 
-  /**
-   * Poll a report until it completes. Returns the download URL.
-   * Amazon typically completes reports in 30s–5min.
-   */
-  async waitForReport(reportId: string, maxWaitMs = 600_000): Promise<string> {
-    const headers = await this.apiHeaders();
+  async waitForReport(reportId: string, profileId: string, maxWaitMs = 600_000): Promise<string> {
+    const headers = await this.apiHeaders(profileId);
     const url = `${this.baseUrl}/reporting/reports/${reportId}`;
     const started = Date.now();
 
@@ -293,7 +311,6 @@ export class AmazonAdsClient {
         throw new Error(`Report ${reportId} failed`);
       }
 
-      // Wait before polling again (exponential backoff: 5s, 10s, 20s, capped at 30s)
       const elapsed = Date.now() - started;
       const delay = Math.min(5000 * Math.pow(2, Math.floor(elapsed / 15000)), 30000);
       await new Promise(r => setTimeout(r, delay));
@@ -302,10 +319,6 @@ export class AmazonAdsClient {
     throw new Error(`Report ${reportId} timed out after ${maxWaitMs / 1000}s`);
   }
 
-  /**
-   * Download a completed report from its URL.
-   * Amazon serves reports as gzipped JSON.
-   */
   async downloadReport(downloadUrl: string): Promise<any[]> {
     const resp = await fetch(downloadUrl);
 
@@ -313,15 +326,12 @@ export class AmazonAdsClient {
       throw new Error(`Report download failed (${resp.status})`);
     }
 
-    // The response may be gzipped — the fetch API auto-decompresses
     const text = await resp.text();
 
-    // Amazon v3 reports return newline-delimited JSON or a JSON array
     try {
       const parsed = JSON.parse(text);
       return Array.isArray(parsed) ? parsed : [parsed];
     } catch {
-      // Try newline-delimited JSON
       return text
         .split('\n')
         .filter(line => line.trim())
@@ -334,20 +344,19 @@ export class AmazonAdsClient {
    */
   async fetchReport(req: ReportRequest): Promise<any[]> {
     const reportId = await this.requestReport(req);
-    const downloadUrl = await this.waitForReport(reportId);
+    const downloadUrl = await this.waitForReport(reportId, req.profileId);
     return this.downloadReport(downloadUrl);
   }
 
-  // ── Profiles ──────────────────────────────────────────────────────────────
+  // ── List Remote Profiles ──────────────────────────────────────────────────
 
-  /**
-   * List all advertising profiles accessible with the current credentials.
-   * Useful for discovering profile IDs during initial setup.
-   */
-  async listProfiles(): Promise<any[]> {
-    const headers = await this.apiHeaders();
-    // Profile listing doesn't require the Scope header
-    delete (headers as any)['Amazon-Advertising-API-Scope'];
+  async listRemoteProfiles(): Promise<any[]> {
+    const token = await this.refreshAccessToken();
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${token}`,
+      'Amazon-Advertising-API-ClientId': this.config.clientId,
+      'Content-Type': 'application/json',
+    };
 
     const resp = await fetch(`${this.baseUrl}/v2/profiles`, { headers });
 
@@ -361,15 +370,23 @@ export class AmazonAdsClient {
 
   // ── Health Check ──────────────────────────────────────────────────────────
 
-  /**
-   * Verify that credentials are valid and the API is reachable.
-   */
-  async healthCheck(): Promise<{ ok: boolean; profileId: string; region: string; error?: string }> {
+  async healthCheck(): Promise<{ ok: boolean; profiles: number; region: string; countries: string[]; error?: string }> {
     try {
       await this.refreshAccessToken();
-      return { ok: true, profileId: this.config.profileId, region: this.config.region };
+      return {
+        ok: true,
+        profiles: this.profiles.length,
+        region: this.config.region,
+        countries: this.profiles.map(p => p.country),
+      };
     } catch (err: any) {
-      return { ok: false, profileId: this.config.profileId, region: this.config.region, error: err.message };
+      return {
+        ok: false,
+        profiles: this.profiles.length,
+        region: this.config.region,
+        countries: this.profiles.map(p => p.country),
+        error: err.message,
+      };
     }
   }
 }
@@ -389,7 +406,7 @@ export function getAmazonAdsClient(): AmazonAdsClient | null {
     !process.env.AMAZON_ADS_CLIENT_ID ||
     !process.env.AMAZON_ADS_CLIENT_SECRET ||
     !process.env.AMAZON_ADS_REFRESH_TOKEN ||
-    !process.env.AMAZON_ADS_PROFILE_ID
+    !process.env.AMAZON_ADS_PROFILE_IDS
   ) {
     return null;
   }

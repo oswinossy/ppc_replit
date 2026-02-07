@@ -10,7 +10,7 @@
  */
 
 import { db } from '../db';
-import { getAmazonAdsClient, type ReportRequest } from '../amazonAdsClient';
+import { getAmazonAdsClient, type ReportRequest, type ProfileEntry } from '../amazonAdsClient';
 import {
   productSearchTerms,
   productPlacement,
@@ -19,11 +19,10 @@ import {
   displayMatchedTarget,
   displayTargeting,
 } from '@shared/schema';
-import { sql } from 'drizzle-orm';
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface SyncResult {
+  country: string;
   reportType: string;
   rowsFetched: number;
   rowsInserted: number;
@@ -34,27 +33,9 @@ interface FullSyncResult {
   success: boolean;
   startedAt: string;
   completedAt: string;
+  countriesSynced: number;
   results: SyncResult[];
   totalRows: number;
-}
-
-// ─── Country mapping ─────────────────────────────────────────────────────────
-
-/**
- * Amazon marketplace IDs → country codes used in the existing schema.
- * The profile's countryCode from the API maps directly.
- */
-function normalizeCountry(countryCode: string | undefined): string {
-  if (!countryCode) return 'US';
-  const map: Record<string, string> = {
-    US: 'US', CA: 'CA', MX: 'MX', BR: 'BR',       // NA
-    UK: 'UK', GB: 'UK', DE: 'DE', FR: 'FR',        // EU
-    IT: 'IT', ES: 'ES', NL: 'NL', SE: 'SE',
-    PL: 'PL', BE: 'BE', TR: 'TR',
-    JP: 'JP', AU: 'AU', SG: 'SG', IN: 'IN',        // FE
-    AE: 'AE', SA: 'SA',
-  };
-  return map[countryCode.toUpperCase()] || countryCode.toUpperCase();
 }
 
 // ─── Per-report-type insert logic ────────────────────────────────────────────
@@ -330,13 +311,19 @@ const INSERT_FN: Record<string, (rows: any[], country: string) => Promise<number
 
 // ─── Public sync function ────────────────────────────────────────────────────
 
+const REPORT_TYPES: ReportRequest['reportType'][] = [
+  'spSearchTerm', 'spPlacement',
+  'sbSearchTerm', 'sbPlacement',
+  'sdMatchedTarget', 'sdTargeting',
+];
+
 /**
- * Run a full sync: fetch all 6 report types for the given date range
- * and insert the data into Supabase.
+ * Run a full sync across all configured marketplace profiles.
+ * For each country, fetches all 6 report types and inserts into Supabase.
  *
  * @param startDate YYYY-MM-DD (defaults to yesterday)
  * @param endDate   YYYY-MM-DD (defaults to yesterday)
- * @param country   Country code override (auto-detected from profile if omitted)
+ * @param country   Optional — sync only this country (must match a key in AMAZON_ADS_PROFILE_IDS)
  */
 export async function syncAmazonAdsData(
   startDate?: string,
@@ -351,7 +338,8 @@ export async function syncAmazonAdsData(
       success: false,
       startedAt,
       completedAt: new Date().toISOString(),
-      results: [{ reportType: 'all', rowsFetched: 0, rowsInserted: 0, error: 'Amazon Ads credentials not configured' }],
+      countriesSynced: 0,
+      results: [{ country: '-', reportType: 'all', rowsFetched: 0, rowsInserted: 0, error: 'Amazon Ads credentials not configured' }],
       totalRows: 0,
     };
   }
@@ -368,34 +356,50 @@ export async function syncAmazonAdsData(
     endDate = endDate || defaultDate;
   }
 
-  // Resolve country from region env var if not provided
-  const resolvedCountry = country || normalizeCountry(process.env.AMAZON_ADS_COUNTRY);
-
-  const reportTypes: ReportRequest['reportType'][] = [
-    'spSearchTerm', 'spPlacement',
-    'sbSearchTerm', 'sbPlacement',
-    'sdMatchedTarget', 'sdTargeting',
-  ];
+  // Determine which profiles to sync
+  let profilesToSync: ProfileEntry[] = client.getProfiles();
+  if (country) {
+    profilesToSync = profilesToSync.filter(p => p.country === country.toUpperCase());
+    if (profilesToSync.length === 0) {
+      return {
+        success: false,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        countriesSynced: 0,
+        results: [{ country: country.toUpperCase(), reportType: 'all', rowsFetched: 0, rowsInserted: 0, error: `No profile found for country: ${country}` }],
+        totalRows: 0,
+      };
+    }
+  }
 
   const results: SyncResult[] = [];
   let totalRows = 0;
+  let countriesSynced = 0;
 
-  for (const reportType of reportTypes) {
-    try {
-      console.log(`[AmazonAdsSync] Fetching ${reportType} (${startDate} → ${endDate})...`);
-      const rows = await client.fetchReport({ reportType, startDate, endDate });
-      console.log(`[AmazonAdsSync] ${reportType}: ${rows.length} rows fetched`);
+  for (const profile of profilesToSync) {
+    console.log(`[AmazonAdsSync] ── Syncing ${profile.country} (profile ${profile.profileId}) ──`);
+    let countryHadError = false;
 
-      const insertFn = INSERT_FN[reportType];
-      const inserted = await insertFn(rows, resolvedCountry);
-      console.log(`[AmazonAdsSync] ${reportType}: ${inserted} rows inserted`);
+    for (const reportType of REPORT_TYPES) {
+      try {
+        console.log(`[AmazonAdsSync] ${profile.country}/${reportType} (${startDate} → ${endDate})...`);
+        const rows = await client.fetchReport({ reportType, startDate, endDate, profileId: profile.profileId });
+        console.log(`[AmazonAdsSync] ${profile.country}/${reportType}: ${rows.length} rows fetched`);
 
-      results.push({ reportType, rowsFetched: rows.length, rowsInserted: inserted });
-      totalRows += inserted;
-    } catch (err: any) {
-      console.error(`[AmazonAdsSync] ${reportType} failed:`, err.message);
-      results.push({ reportType, rowsFetched: 0, rowsInserted: 0, error: err.message });
+        const insertFn = INSERT_FN[reportType];
+        const inserted = await insertFn(rows, profile.country);
+        console.log(`[AmazonAdsSync] ${profile.country}/${reportType}: ${inserted} rows inserted`);
+
+        results.push({ country: profile.country, reportType, rowsFetched: rows.length, rowsInserted: inserted });
+        totalRows += inserted;
+      } catch (err: any) {
+        console.error(`[AmazonAdsSync] ${profile.country}/${reportType} failed:`, err.message);
+        results.push({ country: profile.country, reportType, rowsFetched: 0, rowsInserted: 0, error: err.message });
+        countryHadError = true;
+      }
     }
+
+    if (!countryHadError) countriesSynced++;
   }
 
   const allSucceeded = results.every(r => !r.error);
@@ -404,6 +408,7 @@ export async function syncAmazonAdsData(
     success: allSucceeded,
     startedAt,
     completedAt: new Date().toISOString(),
+    countriesSynced,
     results,
     totalRows,
   };
