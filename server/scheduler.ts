@@ -1,8 +1,6 @@
 import cron from 'node-cron';
 import { detectBidChanges } from './utils/bidChangeDetector';
 import { generateDailyRecommendations } from './utils/recommendationGenerator';
-import { syncAmazonAdsData } from './utils/amazonAdsSync';
-import { getAmazonAdsClient } from './amazonAdsClient';
 
 let schedulerInitialized = false;
 
@@ -43,30 +41,7 @@ export function startScheduler() {
     timezone: 'UTC'
   });
 
-  // Amazon Ads data sync at 1:00 AM UTC (before bid change detection)
-  // Only runs if Amazon Ads credentials are configured
-  if (getAmazonAdsClient()) {
-    cron.schedule('0 1 * * *', async () => {
-      console.log('[Scheduler] Running daily Amazon Ads data sync at', new Date().toISOString());
-
-      try {
-        const result = await syncAmazonAdsData();
-        console.log(`[Scheduler] Amazon Ads sync complete: ${result.totalRows} rows across ${result.results.length} report types`);
-        if (!result.success) {
-          const failures = result.results.filter(r => r.error);
-          console.warn(`[Scheduler] Some reports failed:`, failures.map(f => `${f.reportType}: ${f.error}`));
-        }
-      } catch (error) {
-        console.error('[Scheduler] Amazon Ads data sync failed:', error);
-      }
-    }, {
-      timezone: 'UTC'
-    });
-
-    console.log('[Scheduler] Amazon Ads data sync scheduled to run daily at 1:00 AM UTC');
-  } else {
-    console.log('[Scheduler] Amazon Ads credentials not configured — skipping ads sync schedule');
-  }
+  // Amazon Ads data sync is handled by n8n. Manual trigger available via POST /api/amazon-ads/sync.
 
   console.log('[Scheduler] Bid change detection scheduled to run daily at 2:00 AM UTC');
   console.log('[Scheduler] Bid recommendations scheduled to run daily at 3:00 AM UTC');
