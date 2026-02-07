@@ -441,6 +441,37 @@ export const displayTargeting = pgTable('s_display_targeting', {
   created_at: timestamp("created_at"),
 });
 
+// Audience Bid Adjustment table - combined campaign bid settings + audience performance
+export const audienceBidAdjustment = pgTable('audience_bid_adjustment', {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  country: text("country").notNull(),
+  profileId: text("profile_id").notNull(),
+  campaignId: text("campaign_id").notNull(),
+  campaignName: text("campaign_name"),
+  campaignStatus: text("campaign_status"),
+  segmentName: text("segment_name"),
+  segmentClassCode: text("segment_class_code"),
+  audienceId: text("audience_id"),
+  bidAdjustmentPct: bigint("bid_adjustment_pct", { mode: "number" }),
+  impressions: bigint("impressions", { mode: "number" }).default(0),
+  clicks: bigint("clicks", { mode: "number" }).default(0),
+  cost: numeric("cost").default("0"),
+  costPerClick: numeric("cost_per_click"),
+  clickThroughRate: numeric("click_through_rate"),
+  purchases7d: bigint("purchases_7d", { mode: "number" }).default(0),
+  sales7d: numeric("sales_7d").default("0"),
+  purchases14d: bigint("purchases_14d", { mode: "number" }).default(0),
+  sales14d: numeric("sales_14d").default("0"),
+  reportStartDate: pgDate("report_start_date"),
+  reportEndDate: pgDate("report_end_date"),
+  syncedAt: timestamp("synced_at").defaultNow(),
+}, (table) => ({
+  countryDateIdx: index("aud_bid_adj_country_date_idx").on(table.country, table.reportStartDate),
+  campaignIdx: index("aud_bid_adj_campaign_idx").on(table.campaignId),
+}));
+
+export type AudienceBidAdjustment = typeof audienceBidAdjustment.$inferSelect;
+
 export const recommendations = pgTable("recommendations", {
   id: text("id").primaryKey().default(sql`gen_random_uuid()`),
   scope: text("scope").notNull(),

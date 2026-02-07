@@ -348,6 +348,88 @@ export class AmazonAdsClient {
     return this.downloadReport(downloadUrl);
   }
 
+  // ── SP Campaigns (with bid adjustments) ──────────────────────────────────
+
+  /**
+   * Fetch all SP campaigns for a profile, including shopperCohortBidding
+   * (audience bid adjustments). Paginates automatically.
+   */
+  async listSpCampaigns(profileId: string): Promise<any[]> {
+    const headers = await this.apiHeaders(profileId);
+    headers['Content-Type'] = 'application/vnd.spCampaign.v3+json';
+    headers['Accept'] = 'application/vnd.spCampaign.v3+json';
+
+    const allCampaigns: any[] = [];
+    let nextToken: string | null = null;
+
+    do {
+      const body: any = { maxResults: 100 };
+      if (nextToken) body.nextToken = nextToken;
+
+      const resp = await fetch(`${this.baseUrl}/sp/campaigns/list`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`SP campaigns list failed (${resp.status}): ${text}`);
+      }
+
+      const data = await resp.json() as { campaigns: any[]; nextToken?: string };
+      allCampaigns.push(...(data.campaigns || []));
+      nextToken = data.nextToken || null;
+    } while (nextToken);
+
+    return allCampaigns;
+  }
+
+  // ── Audience Report (spAudiences) ──────────────────────────────────────
+
+  /**
+   * Request, wait, and download an spAudiences report for a single profile.
+   */
+  async fetchAudienceReport(profileId: string, startDate: string, endDate: string): Promise<any[]> {
+    const headers = await this.apiHeaders(profileId);
+    const url = `${this.baseUrl}/reporting/reports`;
+
+    const payload = {
+      name: 'SP Audiences Report',
+      startDate,
+      endDate,
+      configuration: {
+        adProduct: 'SPONSORED_PRODUCTS',
+        groupBy: ['campaign_bid_boost_segment'],
+        columns: [
+          'startDate', 'endDate',
+          'campaignName', 'campaignId', 'campaignStatus',
+          'segmentName', 'segmentClassCode',
+          'impressions', 'clicks', 'cost', 'costPerClick', 'clickThroughRate',
+          'purchases7d', 'sales7d', 'purchases14d', 'sales14d',
+        ],
+        reportTypeId: 'spAudiences',
+        timeUnit: 'SUMMARY',
+        format: 'GZIP_JSON',
+      },
+    };
+
+    console.log(`[AmazonAds] Requesting spAudiences report for profile ${profileId} (${startDate} → ${endDate})...`);
+
+    const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Audience report request failed (${resp.status}): ${text}`);
+    }
+
+    const data = await resp.json() as { reportId: string };
+    console.log(`[AmazonAds] Audience report queued: ${data.reportId}`);
+
+    const downloadUrl = await this.waitForReport(data.reportId, profileId);
+    return this.downloadReport(downloadUrl);
+  }
+
   // ── List Remote Profiles ──────────────────────────────────────────────────
 
   async listRemoteProfiles(): Promise<any[]> {

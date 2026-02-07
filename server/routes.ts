@@ -3393,6 +3393,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Audience bid adjustment sync: combines campaign bid settings + audience performance report
+  app.post("/api/amazon-ads/sync-audiences", async (req, res) => {
+    const { syncAudienceBidData } = await import('./utils/audienceBidSync');
+    const { startDate, endDate, country } = req.body || {};
+    try {
+      const result = await syncAudienceBidData(startDate, endDate, country);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
