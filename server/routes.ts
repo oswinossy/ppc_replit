@@ -872,6 +872,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let allResults: Array<{
         placement: string | null;
         biddingStrategy: string | null;
+        bidAdjustmentPct: string | null;
         date: string | null;
         country: string | null;
         impressions: string | null;
@@ -894,6 +895,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             SELECT
               COALESCE(placement_classification, 'Brand') as placement,
               campaign_bidding_strategy as "biddingStrategy",
+              bid_adjustment_pct::text as "bidAdjustmentPct",
               date::text as date,
               country,
               impressions::text as impressions,
@@ -916,6 +918,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             SELECT
               placement,
               campaign_bidding_strategy as "biddingStrategy",
+              bid_adjustment_pct::text as "bidAdjustmentPct",
               date::text as date,
               country,
               impressions::text as impressions,
@@ -976,6 +979,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const placementGroups = new Map<string, {
         placement: string;
         biddingStrategy: string;
+        bidAdjustmentPct: number | null;
+        latestDate: string | null;
         totalImpressions: number;
         totalClicks: number;
         totalCostEur: number;
@@ -986,11 +991,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Process all results in memory
       allResults.forEach(row => {
         const key = `${row.placement || 'UNKNOWN'}_${row.biddingStrategy || 'Not set'}`;
-        
+
         if (!placementGroups.has(key)) {
           placementGroups.set(key, {
             placement: row.placement || 'UNKNOWN',
             biddingStrategy: row.biddingStrategy || 'Not set',
+            bidAdjustmentPct: null,
+            latestDate: null,
             totalImpressions: 0,
             totalClicks: 0,
             totalCostEur: 0,
@@ -1001,6 +1008,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const group = placementGroups.get(key)!;
         const rates = exchangeRatesMap.get(row.date || '') || {};
+
+        // Track the bid adjustment from the most recent row
+        if (row.bidAdjustmentPct !== null && row.date && (!group.latestDate || row.date > group.latestDate)) {
+          group.bidAdjustmentPct = Number(row.bidAdjustmentPct);
+          group.latestDate = row.date;
+        }
 
         // Convert to EUR and aggregate
         const impressions = Number(row.impressions || 0);
@@ -1029,8 +1042,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const cvr = group.totalClicks > 0 ? (group.totalOrders / group.totalClicks) * 100 : 0;
         
         const normalizedPlacement = normalizePlacementName(group.placement);
-        const currentBidAdjustment = bidAdjustmentsMap.get(normalizedPlacement) ?? 0;
-        
+        // Use bid adjustment from placement data (most recent row), falling back to Bid_Adjustments table
+        const currentBidAdjustment = group.bidAdjustmentPct ?? bidAdjustmentsMap.get(normalizedPlacement) ?? 0;
+
         // Calculate recommended change in bid adjustment based on ACOS (only if ACOS target is configured)
         let recommendedChange = 0;
 
@@ -1067,8 +1081,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           targetBidAdjustment = Math.round(Math.max(0, Math.min(900, rawTarget)));
         }
 
-        const bidAdjustment = bidAdjustmentsMap.get(normalizedPlacement) ?? null;
-        
+        // Use bid adjustment from placement data, fall back to Bid_Adjustments table
+        const bidAdjustment = group.bidAdjustmentPct ?? bidAdjustmentsMap.get(normalizedPlacement) ?? null;
+
         return {
           placement: normalizedPlacement,
           biddingStrategy: group.biddingStrategy,
