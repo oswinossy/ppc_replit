@@ -863,6 +863,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(conditions.length > 0 ? and(...conditions) : undefined);
       }
 
+      console.log('[campaign-placements] campaignId=%s type=%s from=%s to=%s rows=%d', campaignId, campaignType, from, to, allResults.length);
+
       // Fetch latest bid adjustments from "Bid_Adjustments" table for this campaign
       let bidAdjustmentsMap = new Map<string, number>();
       if (campaignId) {

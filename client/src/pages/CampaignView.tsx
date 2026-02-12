@@ -9,12 +9,13 @@ import ACOSBadge from "@/components/ACOSBadge";
 import CurrencyBadge from "@/components/CurrencyBadge";
 import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
-import { Download, TrendingUp, Target } from "lucide-react";
+import { Download, TrendingUp, Target, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Link } from "wouter";
 import { useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
+import { format, subDays } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useSearchParams } from "@/hooks/useSearchParams";
@@ -36,7 +37,14 @@ export default function CampaignView() {
   const campaignTypeLabel = campaignType === 'brands' ? 'Sponsored Brands' : 
                             campaignType === 'display' ? 'Display' : 'Sponsored Products';
   
-  const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
+  const [dateRange, setDateRange] = useState<{ from: string; to: string }>(() => {
+    const to = new Date();
+    const from = subDays(to, 59);
+    return {
+      from: format(from, 'yyyy-MM-dd'),
+      to: format(to, 'yyyy-MM-dd'),
+    };
+  });
   const [viewMode, setViewMode] = useState<ViewMode>(initialView === 'placements' ? 'placements' : 'search-terms');
   
   // Auto-switch to placements view if URL has view=placements
@@ -317,7 +325,7 @@ export default function CampaignView() {
             </div>
             {placementsLoading ? (
               <Skeleton className="h-64" />
-            ) : placements?.placements ? (
+            ) : placements?.placements?.length > 0 ? (
               <DataTable
                 columns={[
                   { key: "placement", label: "Placement", sortable: true },
@@ -356,7 +364,16 @@ export default function CampaignView() {
                 ]}
                 data={placements.placements}
               />
-            ) : null}
+            ) : (
+              <div className="border rounded-lg py-12 text-center text-muted-foreground">
+                <Info className="h-8 w-8 mx-auto mb-3" />
+                <p className="font-medium">No placement data available</p>
+                <p className="text-sm mt-1">
+                  No placement data was found for this campaign in the selected date range.
+                  Try selecting a different time period.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </main>
