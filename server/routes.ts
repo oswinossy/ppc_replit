@@ -755,11 +755,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .groupBy(displayTargeting.targetingText);
       } else {
         // Default: Query product placements only
+        // NOTE: date column is TEXT type, so we must cast to ::date for reliable comparison
         const conditions = [];
         if (campaignId) conditions.push(sql`${productPlacement.campaignId}::text = ${campaignId}`);
         if (country) conditions.push(eq(productPlacement.country, country as string));
-        if (from) conditions.push(gte(productPlacement.date, from as string));
-        if (to) conditions.push(lte(productPlacement.date, to as string));
+        if (from) conditions.push(sql`${productPlacement.date}::date >= ${from}::date`);
+        if (to) conditions.push(sql`${productPlacement.date}::date <= ${to}::date`);
 
         results = await db
           .select({
@@ -842,10 +843,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(conditions.length > 0 ? and(...conditions) : undefined);
       } else {
         // Default: Query product placement table (s_products_placement)
+        // NOTE: date column is TEXT type, so we must cast to ::date for reliable comparison
         const conditions: any[] = [];
         if (campaignId) conditions.push(sql`${productPlacement.campaignId}::text = ${campaignId}`);
-        if (from) conditions.push(gte(productPlacement.date, from as string));
-        if (to) conditions.push(lte(productPlacement.date, to as string));
+        if (from) conditions.push(sql`${productPlacement.date}::date >= ${from}::date`);
+        if (to) conditions.push(sql`${productPlacement.date}::date <= ${to}::date`);
 
         allResults = await db
           .select({
@@ -863,7 +865,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(conditions.length > 0 ? and(...conditions) : undefined);
       }
 
-      console.log('[campaign-placements] campaignId=%s type=%s from=%s to=%s rows=%d', campaignId, campaignType, from, to, allResults.length);
+      // Debug: also count total rows for this campaign without date filter
+      const totalRowsResult = await db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(productPlacement)
+        .where(sql`${productPlacement.campaignId}::text = ${campaignId}`);
+      const totalRows = totalRowsResult[0]?.count ?? 0;
+      console.log('[campaign-placements] campaignId=%s type=%s from=%s to=%s rows=%d totalRowsInTable=%d', campaignId, campaignType, from, to, allResults.length, totalRows);
 
       // Fetch latest bid adjustments from "Bid_Adjustments" table for this campaign
       let bidAdjustmentsMap = new Map<string, number>();
