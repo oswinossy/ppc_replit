@@ -709,6 +709,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Diagnostic endpoint: check what data exists in placement tables
+  app.get("/api/debug/placements", async (req, res) => {
+    try {
+      const { campaignId } = req.query;
+
+      // Count total rows in each placement table
+      const productCount = await db.select({ count: sql<number>`COUNT(*)` }).from(productPlacement);
+      const brandCount = await db.select({ count: sql<number>`COUNT(*)` }).from(brandPlacement);
+
+      // Get sample dates and campaign IDs from product placement
+      const sampleProducts = await db
+        .select({
+          campaignId: productPlacement.campaignId,
+          date: productPlacement.date,
+          placement: productPlacement.placementClassification,
+        })
+        .from(productPlacement)
+        .limit(5);
+
+      // Get distinct campaign IDs from product placement
+      const distinctCampaigns = await db
+        .select({ campaignId: sql<string>`DISTINCT ${productPlacement.campaignId}::text` })
+        .from(productPlacement)
+        .limit(20);
+
+      // If campaignId provided, count rows for that campaign
+      let campaignRows = null;
+      if (campaignId) {
+        const result = await db
+          .select({ count: sql<number>`COUNT(*)` })
+          .from(productPlacement)
+          .where(sql`${productPlacement.campaignId}::text = ${campaignId}`);
+        campaignRows = result[0]?.count ?? 0;
+      }
+
+      // Get min/max dates
+      const dateRange = await db
+        .select({
+          minDate: sql<string>`MIN(${productPlacement.date})`,
+          maxDate: sql<string>`MAX(${productPlacement.date})`,
+        })
+        .from(productPlacement);
+
+      res.json({
+        productPlacementTotalRows: productCount[0]?.count ?? 0,
+        brandPlacementTotalRows: brandCount[0]?.count ?? 0,
+        sampleRows: sampleProducts,
+        distinctCampaignIds: distinctCampaigns.map(r => r.campaignId),
+        campaignIdQueried: campaignId || null,
+        rowsForCampaign: campaignRows,
+        dateRange: dateRange[0] || null,
+      });
+    } catch (error: any) {
+      console.error('Debug placements error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Placements by campaign endpoint - filters by campaign type
   app.get("/api/placements", async (req, res) => {
     try {
