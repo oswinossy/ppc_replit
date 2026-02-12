@@ -48,7 +48,7 @@ export const brandSearchTerms = pgTable('s_brand_search_terms', {
 }));
 
 // Brand Placement table - clean numeric types
-export const brandPlacement = pgTable('s_brand_placment', {
+export const brandPlacement = pgTable('s_brand_placement', {
   date: pgDate("date"),
   campaignId: bigint("campaignId", { mode: "number" }),
   campaignName: text("campaignName"),
@@ -174,7 +174,7 @@ export const productSearchTerms = pgTable('s_products_search_terms', {
 }));
 
 // Product Placement table - TEXT columns (legacy structure)
-export const productPlacement = pgTable("s_products_placement", {
+export const productPlacement = pgTable("s_product_placement", {
   id: bigint("id", { mode: "number" }).primaryKey(),
   date: text("date"),
   retailer: text("retailer"),

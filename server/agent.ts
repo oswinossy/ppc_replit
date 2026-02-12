@@ -25,13 +25,13 @@ You have FULL READ ACCESS to all campaign data tables. Use the query_database to
 **s_products_search_terms** - Sponsored Products search term data
 Key columns: date, searchTerm, targeting (keyword you bid on), keywordBid, matchType (EXACT/BROAD/PHRASE/TARGETING_EXPRESSION), campaignName, campaignId, adGroupName, adGroupId, clicks, cost, impressions, sales30d, purchases30d, country, campaignStatus, keywordId
 
-**s_products_placement** - Sponsored Products placement data  
+**s_product_placement** - Sponsored Products placement data  
 Key columns: date, campaignName, campaignId, placementClassification (Top of Search/Product Pages/etc), clicks, cost, sales30d, purchases30d, country
 
 **s_brand_search_terms** - Sponsored Brands search term data
 Key columns: date, searchTerm, keywordText (keyword you bid on), keywordBid, matchType, campaignName, campaignId, adGroupName, adGroupId, clicks, cost, sales, purchases, country
 
-**s_brand_placment** - Sponsored Brands placement data (note: typo in table name)
+**s_brand_placement** - Sponsored Brands placement data
 Key columns: date, campaignName, campaignId, costType, clicks, cost, sales, purchases, impressions, country
 
 **s_display_matched_target** - Display matched target data
@@ -357,7 +357,7 @@ const tools: Anthropic.Tool[] = [
       properties: {
         table: {
           type: "string",
-          enum: ["s_products_search_terms", "s_products_placement", "s_brand_search_terms", "s_brand_placment", "s_display_matched_target", "s_display_targeting", "bid_change_history"],
+          enum: ["s_products_search_terms", "s_product_placement", "s_brand_search_terms", "s_brand_placement", "s_display_matched_target", "s_display_targeting", "bid_change_history"],
           description: "The table to query"
         },
         columns: {
@@ -940,7 +940,7 @@ const TABLE_SCHEMAS: Record<string, TableSchema> = {
     columns: ['date', 'searchTerm', 'targeting', 'keywordBid', 'matchType', 'campaignName', 'campaignId', 'adGroupName', 'adGroupId', 'clicks', 'cost', 'impressions', 'sales30d', 'purchases30d', 'country', 'campaignStatus', 'keywordId', 'currency'],
     dateColumn: 'date'
   },
-  's_products_placement': {
+  's_product_placement': {
     columns: ['date', 'campaignName', 'campaignId', 'placementClassification', 'clicks', 'cost', 'sales30d', 'purchases30d', 'country', 'impressions'],
     dateColumn: 'date'
   },
@@ -948,7 +948,7 @@ const TABLE_SCHEMAS: Record<string, TableSchema> = {
     columns: ['date', 'searchTerm', 'keywordText', 'keywordBid', 'matchType', 'campaignName', 'campaignId', 'adGroupName', 'adGroupId', 'clicks', 'cost', 'sales', 'purchases', 'impressions', 'country', 'currency'],
     dateColumn: 'date'
   },
-  's_brand_placment': {
+  's_brand_placement': {
     columns: ['date', 'campaignName', 'campaignId', 'costType', 'clicks', 'cost', 'sales', 'purchases', 'impressions', 'country', 'currency'],
     dateColumn: 'date'
   },

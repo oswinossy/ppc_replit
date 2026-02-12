@@ -271,7 +271,7 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
         SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) as cost,
         SUM(COALESCE(NULLIF("sales30d", '')::numeric, 0)) as sales,
         SUM(COALESCE(NULLIF("purchases30d", '')::numeric, 0)) as orders
-      FROM "s_products_placement"
+      FROM "s_product_placement"
       WHERE country = ${country}
         AND "placementClassification" IS NOT NULL
       GROUP BY "campaignId", "campaignName", "placementClassification"
@@ -288,7 +288,7 @@ async function generatePlacementRecommendationsForCountry(country: string, conne
       'Site Amazon Business': 'Amazon Business'
     };
     
-    // Map placementClassification values (from s_products_placement) to normalized placement names
+    // Map placementClassification values (from s_product_placement) to normalized placement names
     const placementClassificationMap: Record<string, string> = {
       'Top of Search on-Amazon': 'Top of search (first page)',
       'Detail Page on-Amazon': 'Product pages',

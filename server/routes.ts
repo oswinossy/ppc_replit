@@ -796,44 +796,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Campaign-level placements endpoint - aggregates across all ad groups (Sponsored Products only)
   app.get("/api/campaign-placements", async (req, res) => {
     try {
-      const { campaignId, from, to } = req.query;
-      
+      const { campaignId, from, to, campaignType = 'products' } = req.query;
+
       if (!campaignId) {
         return res.status(400).json({ error: 'Campaign ID is required' });
       }
-      
-      // Fetch campaign-specific ACOS target from database
-      const acosTarget = await getAcosTargetForCampaign(campaignId as string);
-      if (acosTarget === null) {
-        return res.status(400).json({ 
-          error: 'ACOS target not configured',
-          message: `No ACOS target found for campaign ${campaignId}. Please add it to the ACOS_Target_Campaign table.`,
-          campaignId
-        });
-      }
-      
-      const targetAcos = acosTarget * 100; // Convert from decimal (0.35) to percentage (35)
-      
-      // Query ALL placement data for the campaign in one go (not aggregated yet)
-      const conditions: any[] = [];
-      if (campaignId) conditions.push(sql`${productPlacement.campaignId}::text = ${campaignId}`);
-      if (from) conditions.push(gte(productPlacement.date, from as string));
-      if (to) conditions.push(lte(productPlacement.date, to as string));
 
-      const allResults = await db
-        .select({
-          placement: productPlacement.placementClassification,
-          biddingStrategy: productPlacement.campaignBiddingStrategy,
-          date: productPlacement.date,
-          country: productPlacement.country,
-          impressions: sql<string>`NULLIF(${productPlacement.impressions}, '')`,
-          clicks: sql<string>`NULLIF(${productPlacement.clicks}, '')`,
-          cost: sql<string>`NULLIF(${productPlacement.cost}, '')`,
-          sales: sql<string>`NULLIF(${productPlacement.sales30d}, '')`,
-          purchases: sql<string>`NULLIF(${productPlacement.purchases30d}, '')`,
-        })
-        .from(productPlacement)
-        .where(conditions.length > 0 ? and(...conditions) : undefined);
+      // Fetch campaign-specific ACOS target from database (optional - don't block if missing)
+      const acosTarget = await getAcosTargetForCampaign(campaignId as string);
+      const targetAcos = acosTarget !== null ? acosTarget * 100 : null; // Convert from decimal (0.35) to percentage (35), or null if not configured
+      
+      // Query ALL placement data for the campaign based on campaign type
+      let allResults: Array<{
+        placement: string | null;
+        biddingStrategy: string | null;
+        date: string | null;
+        country: string | null;
+        impressions: string | null;
+        clicks: string | null;
+        cost: string | null;
+        sales: string | null;
+        purchases: string | null;
+      }> = [];
+
+      if (campaignType === 'brands') {
+        // Query brand placement table (s_brand_placement)
+        const conditions: any[] = [];
+        if (campaignId) conditions.push(sql`${brandPlacement.campaignId}::text = ${campaignId}`);
+        if (from) conditions.push(gte(brandPlacement.date, from as string));
+        if (to) conditions.push(lte(brandPlacement.date, to as string));
+
+        allResults = await db
+          .select({
+            placement: sql<string>`COALESCE(${brandPlacement.costType}, 'Brand')`,
+            biddingStrategy: sql<string>`NULL`,
+            date: sql<string>`${brandPlacement.date}::text`,
+            country: brandPlacement.country,
+            impressions: sql<string>`${brandPlacement.impressions}::text`,
+            clicks: sql<string>`${brandPlacement.clicks}::text`,
+            cost: sql<string>`${brandPlacement.cost}::text`,
+            sales: sql<string>`${brandPlacement.sales}::text`,
+            purchases: sql<string>`${brandPlacement.purchases}::text`,
+          })
+          .from(brandPlacement)
+          .where(conditions.length > 0 ? and(...conditions) : undefined);
+      } else {
+        // Default: Query product placement table (s_product_placement)
+        const conditions: any[] = [];
+        if (campaignId) conditions.push(sql`${productPlacement.campaignId}::text = ${campaignId}`);
+        if (from) conditions.push(gte(productPlacement.date, from as string));
+        if (to) conditions.push(lte(productPlacement.date, to as string));
+
+        allResults = await db
+          .select({
+            placement: productPlacement.placementClassification,
+            biddingStrategy: productPlacement.campaignBiddingStrategy,
+            date: productPlacement.date,
+            country: productPlacement.country,
+            impressions: sql<string>`NULLIF(${productPlacement.impressions}, '')`,
+            clicks: sql<string>`NULLIF(${productPlacement.clicks}, '')`,
+            cost: sql<string>`NULLIF(${productPlacement.cost}, '')`,
+            sales: sql<string>`NULLIF(${productPlacement.sales30d}, '')`,
+            purchases: sql<string>`NULLIF(${productPlacement.purchases30d}, '')`,
+          })
+          .from(productPlacement)
+          .where(conditions.length > 0 ? and(...conditions) : undefined);
+      }
 
       // Fetch latest bid adjustments from "Bid_Adjustments" table for this campaign
       let bidAdjustmentsMap = new Map<string, number>();
@@ -934,36 +962,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const normalizedPlacement = normalizePlacementName(group.placement);
         const currentBidAdjustment = bidAdjustmentsMap.get(normalizedPlacement) ?? 0;
         
-        // Calculate recommended change in bid adjustment based on ACOS
+        // Calculate recommended change in bid adjustment based on ACOS (only if ACOS target is configured)
         let recommendedChange = 0;
-        
-        if (group.totalClicks >= 30 && group.totalSalesEur > 0) {
-          if (acos <= targetAcos * 0.8) {
-            // ACOS well below target (≤16%), increase bid adjustment
-            if (group.totalClicks >= 1000) {
-              recommendedChange = 20; // +20 percentage points
-            } else if (group.totalClicks >= 300) {
-              recommendedChange = 15; // +15 percentage points
+
+        if (targetAcos !== null) {
+          if (group.totalClicks >= 30 && group.totalSalesEur > 0) {
+            if (acos <= targetAcos * 0.8) {
+              // ACOS well below target, increase bid adjustment
+              if (group.totalClicks >= 1000) {
+                recommendedChange = 20;
+              } else if (group.totalClicks >= 300) {
+                recommendedChange = 15;
+              } else {
+                recommendedChange = 10;
+              }
+            } else if (acos > targetAcos) {
+              // ACOS above target, decrease bid adjustment using formula
+              const targetChange = (targetAcos / acos - 1) * 100;
+              recommendedChange = Math.max(-50, Math.min(0, targetChange));
             } else {
-              recommendedChange = 10; // +10 percentage points
+              // ACOS near target, small adjustment
+              recommendedChange = (targetAcos / acos - 1) * 100;
+              recommendedChange = Math.max(-10, Math.min(10, recommendedChange));
             }
-          } else if (acos > targetAcos) {
-            // ACOS above target, decrease bid adjustment using formula
-            const targetChange = (targetAcos / acos - 1) * 100;
-            recommendedChange = Math.max(-50, Math.min(0, targetChange)); // Cap change at -50 points
-          } else {
-            // ACOS near target, small adjustment
-            recommendedChange = (targetAcos / acos - 1) * 100;
-            recommendedChange = Math.max(-10, Math.min(10, recommendedChange));
+          } else if (group.totalClicks >= 30 && group.totalSalesEur === 0) {
+            // No sales, recommend decreasing bid
+            recommendedChange = -25;
           }
-        } else if (group.totalClicks >= 30 && group.totalSalesEur === 0) {
-          // No sales, recommend decreasing bid
-          recommendedChange = -25; // -25 percentage points
         }
-        
+
         // Calculate target bid adjustment: current + change, capped between 0% and 900%
         let targetBidAdjustment: number | null = null;
-        if (group.totalClicks >= 30) {
+        if (targetAcos !== null && group.totalClicks >= 30) {
           const rawTarget = currentBidAdjustment + recommendedChange;
           targetBidAdjustment = Math.round(Math.max(0, Math.min(900, rawTarget)));
         }
@@ -998,30 +1028,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Cross-check: Does this campaign also have keyword bid recommendations?
       let hasKeywordRecs = false;
       let keywordRecCount = 0;
-      
+
       // Get campaign's country for filtering
       const campaignCountry = allResults.length > 0 ? allResults[0].country : null;
-      
-      if (campaignId && campaignCountry) {
+
+      if (campaignId && campaignCountry && acosTarget !== null) {
         const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
         const sqlClient = postgres(connectionUrl);
         try {
-          // Get ACOS target for this campaign
-          const acosTargetResult = await sqlClient`
-            SELECT acos_target FROM "ACOS_Target_Campaign" 
-            WHERE campaign_id = ${campaignId as string}
-            LIMIT 1
-          `;
-          
-          if (acosTargetResult.length > 0) {
-            const acosTarget = Number(acosTargetResult[0].acos_target);
-            const acosWindow = 0.03; // ±3%
-            
-            // Check if there are keywords with ACOS outside the window
+          const acosWindow = 0.03; // ±3%
+
+          if (campaignType === 'brands') {
+            // Check brand search terms for keyword recommendations
             const keywordCheckResult = await sqlClient`
               SELECT COUNT(*) as count
               FROM (
-                SELECT 
+                SELECT
+                  search_term,
+                  SUM(COALESCE(clicks, 0)) as total_clicks,
+                  SUM(COALESCE(cost::numeric, 0)) as total_cost,
+                  SUM(COALESCE(sales::numeric, 0)) as total_sales
+                FROM "s_brand_search_terms"
+                WHERE campaign_id::text = ${campaignId as string}
+                  AND country = ${campaignCountry}
+                GROUP BY search_term
+                HAVING SUM(COALESCE(clicks, 0)) >= 30
+              ) as keywords
+              WHERE
+                (total_sales > 0 AND (total_cost / total_sales) < ${acosTarget - acosWindow})
+                OR (total_sales > 0 AND (total_cost / total_sales) > ${acosTarget + acosWindow})
+                OR (total_sales = 0 AND total_clicks >= 30)
+            `;
+
+            keywordRecCount = Number(keywordCheckResult[0]?.count || 0);
+            hasKeywordRecs = keywordRecCount > 0;
+          } else {
+            // Check product search terms for keyword recommendations
+            const keywordCheckResult = await sqlClient`
+              SELECT COUNT(*) as count
+              FROM (
+                SELECT
                   keyword,
                   SUM(COALESCE(clicks, 0)) as total_clicks,
                   SUM(COALESCE(cost, 0)) as total_cost,
@@ -1032,12 +1078,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 GROUP BY keyword
                 HAVING SUM(COALESCE(clicks, 0)) >= 30
               ) as keywords
-              WHERE 
+              WHERE
                 (total_sales > 0 AND (total_cost / total_sales) < ${acosTarget - acosWindow})
                 OR (total_sales > 0 AND (total_cost / total_sales) > ${acosTarget + acosWindow})
                 OR (total_sales = 0 AND total_clicks >= 30)
             `;
-            
+
             keywordRecCount = Number(keywordCheckResult[0]?.count || 0);
             hasKeywordRecs = keywordRecCount > 0;
           }
@@ -1565,7 +1611,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           "campaignName" as campaign_name,
           '' as country,
           COALESCE("campaignStatus", '') as campaign_status
-        FROM "s_brand_placment"
+        FROM "s_brand_placement"
         WHERE "campaignName" ILIKE '%VID%'
       `);
       for (const row of brandPlacementData as any[]) {
@@ -1595,7 +1641,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           "campaignName" as campaign_name,
           COALESCE(country, '') as country,
           '' as campaign_status
-        FROM s_products_placement
+        FROM s_product_placement
         WHERE "campaignName" ILIKE '%VID%'
       `);
       for (const row of productPlacementData as any[]) {
@@ -2489,7 +2535,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             SUM(COALESCE(NULLIF(clicks, '')::numeric, 0)) as clicks,
             SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) as cost,
             SUM(COALESCE(NULLIF("sales30d", '')::numeric, 0)) as sales
-          FROM "s_products_placement"
+          FROM "s_product_placement"
           WHERE country = ${country as string}
             AND "campaignId"::text = ANY(${campaignIds})
           GROUP BY "campaignId", "placementClassification"
@@ -2578,7 +2624,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) as cost,
           SUM(COALESCE(NULLIF("sales30d", '')::numeric, 0)) as sales,
           SUM(COALESCE(NULLIF("purchases30d", '')::numeric, 0)) as orders
-        FROM "s_products_placement"
+        FROM "s_product_placement"
         WHERE country = ${country as string}
           AND "placementClassification" IS NOT NULL
           ${campaignId ? sqlClient`AND "campaignId" = ${campaignId as string}` : sqlClient``}
