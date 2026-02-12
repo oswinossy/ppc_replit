@@ -712,55 +712,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Diagnostic endpoint: check what data exists in placement tables
   app.get("/api/debug/placements", async (req, res) => {
     try {
-      const { campaignId } = req.query;
+      const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+      const sqlClient = postgres(connectionUrl);
+      try {
+        // 1. Get actual column names from the table
+        const columns = await sqlClient`
+          SELECT column_name, data_type
+          FROM information_schema.columns
+          WHERE table_name = 's_products_placement'
+          ORDER BY ordinal_position
+        `;
 
-      // Count total rows in each placement table
-      const productCount = await db.select({ count: sql<number>`COUNT(*)` }).from(productPlacement);
-      const brandCount = await db.select({ count: sql<number>`COUNT(*)` }).from(brandPlacement);
+        // 2. Count total rows
+        const countResult = await sqlClient`SELECT COUNT(*) as count FROM s_products_placement`;
 
-      // Get sample dates and campaign IDs from product placement
-      const sampleProducts = await db
-        .select({
-          campaignId: productPlacement.campaignId,
-          date: productPlacement.date,
-          placement: productPlacement.placementClassification,
-        })
-        .from(productPlacement)
-        .limit(5);
+        // 3. Get 3 sample rows
+        const sampleRows = await sqlClient`SELECT * FROM s_products_placement LIMIT 3`;
 
-      // Get distinct campaign IDs from product placement
-      const distinctCampaigns = await db
-        .select({ campaignId: sql<string>`DISTINCT ${productPlacement.campaignId}::text` })
-        .from(productPlacement)
-        .limit(20);
+        // 4. Also check brand placement columns
+        const brandColumns = await sqlClient`
+          SELECT column_name, data_type
+          FROM information_schema.columns
+          WHERE table_name = 's_brand_placement'
+          ORDER BY ordinal_position
+        `;
+        const brandCount = await sqlClient`SELECT COUNT(*) as count FROM s_brand_placement`;
 
-      // If campaignId provided, count rows for that campaign
-      let campaignRows = null;
-      if (campaignId) {
-        const result = await db
-          .select({ count: sql<number>`COUNT(*)` })
-          .from(productPlacement)
-          .where(sql`${productPlacement.campaignId}::text = ${campaignId}`);
-        campaignRows = result[0]?.count ?? 0;
+        res.json({
+          productPlacement: {
+            columns: columns,
+            totalRows: countResult[0]?.count,
+            sampleRows: sampleRows,
+          },
+          brandPlacement: {
+            columns: brandColumns,
+            totalRows: brandCount[0]?.count,
+          },
+        });
+      } finally {
+        await sqlClient.end();
       }
-
-      // Get min/max dates
-      const dateRange = await db
-        .select({
-          minDate: sql<string>`MIN(${productPlacement.date})`,
-          maxDate: sql<string>`MAX(${productPlacement.date})`,
-        })
-        .from(productPlacement);
-
-      res.json({
-        productPlacementTotalRows: productCount[0]?.count ?? 0,
-        brandPlacementTotalRows: brandCount[0]?.count ?? 0,
-        sampleRows: sampleProducts,
-        distinctCampaignIds: distinctCampaigns.map(r => r.campaignId),
-        campaignIdQueried: campaignId || null,
-        rowsForCampaign: campaignRows,
-        dateRange: dateRange[0] || null,
-      });
     } catch (error: any) {
       console.error('Debug placements error:', error);
       res.status(500).json({ error: error.message });
