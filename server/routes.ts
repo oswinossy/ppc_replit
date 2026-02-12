@@ -3372,12 +3372,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Test database connection by running a simple query
       await db.execute(sql`SELECT 1 as test`);
       
-      // Also verify our tables exist
+      // List all public tables in the database
       const tableCheck = await db.execute(sql`
-        SELECT table_name 
-        FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name IN ('s_products_search_terms', 's_brand_search_terms', 's_display_matched_target')
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+        ORDER BY table_name
       `);
       
       const tables = Array.isArray(tableCheck) ? tableCheck.map((row: any) => row.table_name) : [];
