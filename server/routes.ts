@@ -759,69 +759,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Placements by campaign endpoint - filters by campaign type
+  // Uses raw SQL because actual DB column names (snake_case) differ from Drizzle schema (camelCase)
   app.get("/api/placements", async (req, res) => {
     try {
       const { campaignId, adGroupId, country, campaignType = 'products', from, to } = req.query;
-      
+      const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+      const sqlClient = postgres(connectionUrl);
+
       let results: Array<{ placement: string | null; clicks: number; cost: number; sales: number; purchases: number }> = [];
 
-      if (campaignType === 'brands') {
-        // Query brand placements only (no adGroupId in brand tables)
-        const conditions = [];
-        if (campaignId) conditions.push(sql`${brandPlacement.campaignId}::text = ${campaignId}`);
-        if (country) conditions.push(eq(brandPlacement.country, country as string));
-        if (from) conditions.push(gte(brandPlacement.date, from as string));
-        if (to) conditions.push(lte(brandPlacement.date, to as string));
+      try {
+        if (campaignType === 'brands') {
+          const conditions = ['1=1'];
+          const params: any[] = [];
+          if (campaignId) { conditions.push(`campaign_id::text = $${params.length + 1}`); params.push(campaignId); }
+          if (country) { conditions.push(`country = $${params.length + 1}`); params.push(country); }
+          if (from) { conditions.push(`date >= $${params.length + 1}::date`); params.push(from); }
+          if (to) { conditions.push(`date <= $${params.length + 1}::date`); params.push(to); }
 
-        results = await db
-          .select({
-            placement: sql<string>`'Brand'`, // Brand doesn't have placement types, label as 'Brand'
-            clicks: sql<number>`COALESCE(SUM(${brandPlacement.clicks}), 0)`,
-            cost: sql<number>`COALESCE(SUM(${brandPlacement.cost}), 0)`,
-            sales: sql<number>`COALESCE(SUM(${brandPlacement.sales}), 0)`,
-            purchases: sql<number>`COALESCE(SUM(${brandPlacement.purchases}), 0)`,
-          })
-          .from(brandPlacement)
-          .where(conditions.length > 0 ? and(...conditions) : undefined);
-      } else if (campaignType === 'display') {
-        // Query display targeting (equivalent to placements for display, no adGroupId filter)
-        const conditions = [];
-        if (campaignId) conditions.push(sql`${displayTargeting.campaignId}::text = ${campaignId}`);
-        if (country) conditions.push(eq(displayTargeting.country, country as string));
-        if (from) conditions.push(gte(displayTargeting.date, from as string));
-        if (to) conditions.push(lte(displayTargeting.date, to as string));
+          results = await sqlClient.unsafe(`
+            SELECT
+              COALESCE(placement_classification, 'Brand') as placement,
+              COALESCE(SUM(clicks), 0) as clicks,
+              COALESCE(SUM(cost), 0) as cost,
+              COALESCE(SUM(sales_14d), 0) as sales,
+              COALESCE(SUM(purchases_14d), 0) as purchases
+            FROM s_brand_placement
+            WHERE ${conditions.join(' AND ')}
+            GROUP BY placement_classification
+          `, params);
+        } else if (campaignType === 'display') {
+          // Display targeting - keep using Drizzle since display schema may be correct
+          const conditions = [];
+          if (campaignId) conditions.push(sql`${displayTargeting.campaignId}::text = ${campaignId}`);
+          if (country) conditions.push(eq(displayTargeting.country, country as string));
+          if (from) conditions.push(gte(displayTargeting.date, from as string));
+          if (to) conditions.push(lte(displayTargeting.date, to as string));
 
-        results = await db
-          .select({
-            placement: displayTargeting.targetingText,
-            clicks: sql<number>`COALESCE(SUM(${displayTargeting.clicks}), 0)`,
-            cost: sql<number>`COALESCE(SUM(${displayTargeting.cost}), 0)`,
-            sales: sql<number>`COALESCE(SUM(${displayTargeting.sales}), 0)`,
-            purchases: sql<number>`COALESCE(SUM(${displayTargeting.purchases}), 0)`,
-          })
-          .from(displayTargeting)
-          .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .groupBy(displayTargeting.targetingText);
-      } else {
-        // Default: Query product placements only
-        // NOTE: date column is TEXT type, so we must cast to ::date for reliable comparison
-        const conditions = [];
-        if (campaignId) conditions.push(sql`${productPlacement.campaignId}::text = ${campaignId}`);
-        if (country) conditions.push(eq(productPlacement.country, country as string));
-        if (from) conditions.push(sql`${productPlacement.date}::date >= ${from}::date`);
-        if (to) conditions.push(sql`${productPlacement.date}::date <= ${to}::date`);
+          results = await db
+            .select({
+              placement: displayTargeting.targetingText,
+              clicks: sql<number>`COALESCE(SUM(${displayTargeting.clicks}), 0)`,
+              cost: sql<number>`COALESCE(SUM(${displayTargeting.cost}), 0)`,
+              sales: sql<number>`COALESCE(SUM(${displayTargeting.sales}), 0)`,
+              purchases: sql<number>`COALESCE(SUM(${displayTargeting.purchases}), 0)`,
+            })
+            .from(displayTargeting)
+            .where(conditions.length > 0 ? and(...conditions) : undefined)
+            .groupBy(displayTargeting.targetingText);
+        } else {
+          // Product placements - use raw SQL with correct column names
+          const conditions = ['1=1'];
+          const params: any[] = [];
+          if (campaignId) { conditions.push(`campaign_id::text = $${params.length + 1}`); params.push(campaignId); }
+          if (country) { conditions.push(`country = $${params.length + 1}`); params.push(country); }
+          if (from) { conditions.push(`date >= $${params.length + 1}::date`); params.push(from); }
+          if (to) { conditions.push(`date <= $${params.length + 1}::date`); params.push(to); }
 
-        results = await db
-          .select({
-            placement: productPlacement.placementClassification,
-            clicks: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.clicks}, '')::numeric), 0)`,
-            cost: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.cost}, '')::numeric), 0)`,
-            sales: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.sales30d}, '')::numeric), 0)`,
-            purchases: sql<number>`COALESCE(SUM(NULLIF(${productPlacement.purchases30d}, '')::numeric), 0)`,
-          })
-          .from(productPlacement)
-          .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .groupBy(productPlacement.placementClassification);
+          results = await sqlClient.unsafe(`
+            SELECT
+              placement,
+              COALESCE(SUM(clicks), 0) as clicks,
+              COALESCE(SUM(spend), 0) as cost,
+              COALESCE(SUM(sales_7d), 0) as sales,
+              COALESCE(SUM(purchases_7d), 0) as purchases
+            FROM s_products_placement
+            WHERE ${conditions.join(' AND ')}
+            GROUP BY placement
+          `, params);
+        }
+      } finally {
+        await sqlClient.end();
       }
 
       const placements = results
@@ -843,7 +851,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Campaign-level placements endpoint - aggregates across all ad groups (Sponsored Products only)
+  // Campaign-level placements endpoint - aggregates across all ad groups
+  // Uses raw SQL because actual DB column names (snake_case) differ from Drizzle schema (camelCase)
   app.get("/api/campaign-placements", async (req, res) => {
     try {
       const { campaignId, from, to, campaignType = 'products' } = req.query;
@@ -854,8 +863,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Fetch campaign-specific ACOS target from database (optional - don't block if missing)
       const acosTarget = await getAcosTargetForCampaign(campaignId as string);
-      const targetAcos = acosTarget !== null ? acosTarget * 100 : null; // Convert from decimal (0.35) to percentage (35), or null if not configured
-      
+      const targetAcos = acosTarget !== null ? acosTarget * 100 : null;
+
+      const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+      const sqlClient = postgres(connectionUrl);
+
       // Query ALL placement data for the campaign based on campaign type
       let allResults: Array<{
         placement: string | null;
@@ -869,64 +881,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
         purchases: string | null;
       }> = [];
 
-      if (campaignType === 'brands') {
-        // Query brand placement table (s_brand_placement)
-        const conditions: any[] = [];
-        if (campaignId) conditions.push(sql`${brandPlacement.campaignId}::text = ${campaignId}`);
-        if (from) conditions.push(gte(brandPlacement.date, from as string));
-        if (to) conditions.push(lte(brandPlacement.date, to as string));
+      try {
+        if (campaignType === 'brands') {
+          // Query brand placement table with correct column names
+          const conditions = ['1=1'];
+          const params: any[] = [];
+          if (campaignId) { conditions.push(`campaign_id::text = $${params.length + 1}`); params.push(campaignId); }
+          if (from) { conditions.push(`date >= $${params.length + 1}::date`); params.push(from); }
+          if (to) { conditions.push(`date <= $${params.length + 1}::date`); params.push(to); }
 
-        allResults = await db
-          .select({
-            placement: sql<string>`COALESCE(${brandPlacement.costType}, 'Brand')`,
-            biddingStrategy: sql<string>`NULL`,
-            date: sql<string>`${brandPlacement.date}::text`,
-            country: brandPlacement.country,
-            impressions: sql<string>`${brandPlacement.impressions}::text`,
-            clicks: sql<string>`${brandPlacement.clicks}::text`,
-            cost: sql<string>`${brandPlacement.cost}::text`,
-            sales: sql<string>`${brandPlacement.sales}::text`,
-            purchases: sql<string>`${brandPlacement.purchases}::text`,
-          })
-          .from(brandPlacement)
-          .where(conditions.length > 0 ? and(...conditions) : undefined);
-      } else {
-        // Default: Query product placement table (s_products_placement)
-        // NOTE: date column is TEXT type, so we must cast to ::date for reliable comparison
-        const conditions: any[] = [];
-        if (campaignId) conditions.push(sql`${productPlacement.campaignId}::text = ${campaignId}`);
-        if (from) conditions.push(sql`${productPlacement.date}::date >= ${from}::date`);
-        if (to) conditions.push(sql`${productPlacement.date}::date <= ${to}::date`);
+          allResults = await sqlClient.unsafe(`
+            SELECT
+              COALESCE(placement_classification, 'Brand') as placement,
+              campaign_bidding_strategy as "biddingStrategy",
+              date::text as date,
+              country,
+              impressions::text as impressions,
+              clicks::text as clicks,
+              cost::text as cost,
+              sales_14d::text as sales,
+              purchases_14d::text as purchases
+            FROM s_brand_placement
+            WHERE ${conditions.join(' AND ')}
+          `, params);
+        } else {
+          // Product placement table with correct snake_case column names
+          const conditions = ['1=1'];
+          const params: any[] = [];
+          if (campaignId) { conditions.push(`campaign_id::text = $${params.length + 1}`); params.push(campaignId); }
+          if (from) { conditions.push(`date >= $${params.length + 1}::date`); params.push(from); }
+          if (to) { conditions.push(`date <= $${params.length + 1}::date`); params.push(to); }
 
-        allResults = await db
-          .select({
-            placement: productPlacement.placementClassification,
-            biddingStrategy: productPlacement.campaignBiddingStrategy,
-            date: productPlacement.date,
-            country: productPlacement.country,
-            impressions: sql<string>`NULLIF(${productPlacement.impressions}, '')`,
-            clicks: sql<string>`NULLIF(${productPlacement.clicks}, '')`,
-            cost: sql<string>`NULLIF(${productPlacement.cost}, '')`,
-            sales: sql<string>`NULLIF(${productPlacement.sales30d}, '')`,
-            purchases: sql<string>`NULLIF(${productPlacement.purchases30d}, '')`,
-          })
-          .from(productPlacement)
-          .where(conditions.length > 0 ? and(...conditions) : undefined);
+          allResults = await sqlClient.unsafe(`
+            SELECT
+              placement,
+              campaign_bidding_strategy as "biddingStrategy",
+              date::text as date,
+              country,
+              impressions::text as impressions,
+              clicks::text as clicks,
+              spend::text as cost,
+              sales_7d::text as sales,
+              purchases_7d::text as purchases
+            FROM s_products_placement
+            WHERE ${conditions.join(' AND ')}
+          `, params);
+        }
+
+        console.log('[campaign-placements] campaignId=%s type=%s from=%s to=%s rows=%d', campaignId, campaignType, from, to, allResults.length);
+      } catch (queryError) {
+        console.error('[campaign-placements] Query error:', queryError);
+        await sqlClient.end();
+        throw queryError;
       }
 
-      // Debug: also count total rows for this campaign without date filter
-      const totalRowsResult = await db
-        .select({ count: sql<number>`COUNT(*)` })
-        .from(productPlacement)
-        .where(sql`${productPlacement.campaignId}::text = ${campaignId}`);
-      const totalRows = totalRowsResult[0]?.count ?? 0;
-      console.log('[campaign-placements] campaignId=%s type=%s from=%s to=%s rows=%d totalRowsInTable=%d', campaignId, campaignType, from, to, allResults.length, totalRows);
-
       // Fetch latest bid adjustments from "Bid_Adjustments" table for this campaign
+      // Reuses the same sqlClient opened above
       let bidAdjustmentsMap = new Map<string, number>();
       if (campaignId) {
-        const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-        const sqlClient = postgres(connectionUrl);
         try {
           const bidAdjustments = await sqlClient`
             SELECT DISTINCT ON (placement)
@@ -935,7 +947,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             WHERE "CampaignId"::text = ${campaignId as string}
             ORDER BY placement, created_at DESC
           `;
-          
+
           // Map bid adjustment table placement names to normalized names
           for (const row of bidAdjustments) {
             const placement = row.placement as string;
@@ -947,8 +959,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } catch (bidError) {
           console.warn('Could not fetch bid adjustments:', bidError);
-        } finally {
-          await sqlClient.end();
         }
       }
 
@@ -1092,8 +1102,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const campaignCountry = allResults.length > 0 ? allResults[0].country : null;
 
       if (campaignId && campaignCountry && acosTarget !== null) {
-        const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-        const sqlClient = postgres(connectionUrl);
         try {
           const acosWindow = 0.03; // ±3%
 
@@ -1148,13 +1156,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } catch (kwError) {
           console.warn('Could not check keyword recs:', kwError);
-        } finally {
-          await sqlClient.end();
         }
       }
 
+      // Close the shared sqlClient
+      await sqlClient.end();
+
       // Check if any placement has a recommendation
-      const hasPlacementRecs = placements.some(p => 
+      const hasPlacementRecs = placements.some(p =>
         p.targetBidAdjustment !== null && p.targetBidAdjustment !== p.bidAdjustment
       );
 
