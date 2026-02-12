@@ -13,6 +13,7 @@ import { Download, Sparkles } from "lucide-react";
 import { useRoute, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
+import { format, subDays } from "date-fns";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -26,7 +27,14 @@ export default function AdGroupView() {
   // Extract country, campaignType, and campaignId from query parameters
   const { country: countryCode, campaignType, campaignId } = useSearchParams();
   
-  const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
+  const [dateRange, setDateRange] = useState<{ from: string; to: string }>(() => {
+    const to = new Date();
+    const from = subDays(to, 59);
+    return {
+      from: format(from, 'yyyy-MM-dd'),
+      to: format(to, 'yyyy-MM-dd'),
+    };
+  });
   const [showRecommendations, setShowRecommendations] = useState(false);
   
   // Get display name for campaign type

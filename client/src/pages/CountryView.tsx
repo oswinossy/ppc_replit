@@ -13,6 +13,7 @@ import { Download, TrendingUp } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { format, subDays } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSearchParams } from "@/hooks/useSearchParams";
 
@@ -21,7 +22,14 @@ export default function CountryView() {
   const [, setLocation] = useLocation();
   const countryCode = params?.code || "FR";
   const { campaignType } = useSearchParams();
-  const [dateRange, setDateRange] = useState({ from: "2025-09-22", to: "2025-11-22" });
+  const [dateRange, setDateRange] = useState<{ from: string; to: string }>(() => {
+    const to = new Date();
+    const from = subDays(to, 59);
+    return {
+      from: format(from, 'yyyy-MM-dd'),
+      to: format(to, 'yyyy-MM-dd'),
+    };
+  });
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
     queryKey: ['/api/kpis', countryCode, campaignType, dateRange],

@@ -68,9 +68,7 @@ export default function TimeRangePicker({ value, onChange }: TimeRangePickerProp
 
   // Initialize with 60D on mount
   useEffect(() => {
-    if (!value) {
-      handlePresetSelect(60);
-    }
+    handlePresetSelect(60);
   }, []);
 
   const getDisplayText = () => {
