@@ -174,7 +174,7 @@ export const productSearchTerms = pgTable('s_products_search_terms', {
 }));
 
 // Product Placement table - TEXT columns (legacy structure)
-export const productPlacement = pgTable("s_product_placement", {
+export const productPlacement = pgTable("s_products_placement", {
   id: bigint("id", { mode: "number" }).primaryKey(),
   date: text("date"),
   retailer: text("retailer"),

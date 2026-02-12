@@ -841,7 +841,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .from(brandPlacement)
           .where(conditions.length > 0 ? and(...conditions) : undefined);
       } else {
-        // Default: Query product placement table (s_product_placement)
+        // Default: Query product placement table (s_products_placement)
         const conditions: any[] = [];
         if (campaignId) conditions.push(sql`${productPlacement.campaignId}::text = ${campaignId}`);
         if (from) conditions.push(gte(productPlacement.date, from as string));
@@ -1641,7 +1641,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           "campaignName" as campaign_name,
           COALESCE(country, '') as country,
           '' as campaign_status
-        FROM s_product_placement
+        FROM s_products_placement
         WHERE "campaignName" ILIKE '%VID%'
       `);
       for (const row of productPlacementData as any[]) {
@@ -2535,7 +2535,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             SUM(COALESCE(NULLIF(clicks, '')::numeric, 0)) as clicks,
             SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) as cost,
             SUM(COALESCE(NULLIF("sales30d", '')::numeric, 0)) as sales
-          FROM "s_product_placement"
+          FROM "s_products_placement"
           WHERE country = ${country as string}
             AND "campaignId"::text = ANY(${campaignIds})
           GROUP BY "campaignId", "placementClassification"
@@ -2624,7 +2624,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) as cost,
           SUM(COALESCE(NULLIF("sales30d", '')::numeric, 0)) as sales,
           SUM(COALESCE(NULLIF("purchases30d", '')::numeric, 0)) as orders
-        FROM "s_product_placement"
+        FROM "s_products_placement"
         WHERE country = ${country as string}
           AND "placementClassification" IS NOT NULL
           ${campaignId ? sqlClient`AND "campaignId" = ${campaignId as string}` : sqlClient``}
