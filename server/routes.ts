@@ -6,7 +6,7 @@ import { sql, eq, and, gte, lte, desc, asc } from "drizzle-orm";
 import { calculateACOS, calculateCPC, calculateCVR, calculateROAS, getConfidenceLevel } from "./utils/calculations";
 import { generateBidRecommendation, detectNegativeKeywords, generateBulkRecommendations, formatRecommendationsForCSV } from "./utils/recommendations";
 import { getExchangeRatesForDate, getExchangeRatesForRange, convertToEur } from "./utils/exchangeRates";
-import { normalizePlacementName, getCurrencyForCountry, BID_ADJUSTMENT_PLACEMENT_MAP } from "@shared/currency";
+import { normalizePlacementName, getCurrencyForCountry } from "@shared/currency";
 import postgres from "postgres";
 import * as XLSX from 'xlsx';
 import { getCached, setCache, generateCacheKey } from "./cache";
@@ -959,32 +959,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw queryError;
       }
 
-      // Fetch latest bid adjustments from "Bid_Adjustments" table for this campaign
-      // Reuses the same sqlClient opened above
-      let bidAdjustmentsMap = new Map<string, number>();
-      if (campaignId) {
-        try {
-          const bidAdjustments = await sqlClient`
-            SELECT DISTINCT ON (placement)
-              placement, percent
-            FROM "Bid_Adjustments"
-            WHERE "CampaignId"::text = ${campaignId as string}
-            ORDER BY placement, created_at DESC
-          `;
-
-          // Map bid adjustment table placement names to normalized names
-          for (const row of bidAdjustments) {
-            const placement = row.placement as string;
-            const percent = Number(row.percent ?? 0);
-            const normalizedPlacement = BID_ADJUSTMENT_PLACEMENT_MAP[placement];
-            if (normalizedPlacement) {
-              bidAdjustmentsMap.set(normalizedPlacement, percent);
-            }
-          }
-        } catch (bidError) {
-          console.warn('Could not fetch bid adjustments:', bidError);
-        }
-      }
+      // bid_adjustment_pct is now read directly from the placement tables (bidAdjustmentPct column in query results)
 
       // Get date range for exchange rates (fetch all at once with single API call)
       const allDates = allResults.map(r => r.date).filter(Boolean);
@@ -1063,8 +1038,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const cvr = group.totalClicks > 0 ? (group.totalOrders / group.totalClicks) * 100 : 0;
         
         const normalizedPlacement = normalizePlacementName(group.placement);
-        // Use bid adjustment from placement data (most recent row), falling back to Bid_Adjustments table
-        const currentBidAdjustment = group.bidAdjustmentPct ?? bidAdjustmentsMap.get(normalizedPlacement) ?? 0;
+        // Use bid adjustment from placement data (most recent row)
+        const currentBidAdjustment = group.bidAdjustmentPct ?? 0;
 
         // Calculate recommended change in bid adjustment based on ACOS (only if ACOS target is configured)
         let recommendedChange = 0;
@@ -1102,8 +1077,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           targetBidAdjustment = Math.round(Math.max(0, Math.min(900, rawTarget)));
         }
 
-        // Use bid adjustment from placement data, fall back to Bid_Adjustments table
-        const bidAdjustment = group.bidAdjustmentPct ?? bidAdjustmentsMap.get(normalizedPlacement) ?? null;
+        // Use bid adjustment from placement data (most recent row)
+        const bidAdjustment = group.bidAdjustmentPct ?? null;
 
         return {
           placement: normalizedPlacement,
@@ -2699,7 +2674,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/placement-bidding-strategy", async (req, res) => {
     try {
       const { country, campaignId } = req.query;
-      
+
       if (!country) {
         return res.status(400).json({ error: 'Country parameter is required' });
       }
@@ -2711,15 +2686,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Get ACOS targets for campaigns in this country
       const acosTargetsResult = await sqlClient`
-        SELECT campaign_id, acos_target, campaign_name 
-        FROM "ACOS_Target_Campaign" 
+        SELECT campaign_id, acos_target, campaign_name
+        FROM "ACOS_Target_Campaign"
         WHERE country = ${country as string}
       `;
       const acosTargetsMap = new Map(acosTargetsResult.map((r: any) => [r.campaign_id, { target: Number(r.acos_target), name: r.campaign_name }]));
 
-      // Query placement data grouped by campaign (no bid adjustment column in raw data)
+      // --- Product Placements ---
       const placementData = await sqlClient`
-        SELECT 
+        SELECT
           "campaignId" as campaign_id,
           "campaignName" as campaign_name,
           "placementClassification" as placement,
@@ -2737,69 +2712,172 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ORDER BY SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) DESC
       `;
 
+      // Get latest bid_adjustment_pct from s_products_placement
+      const prodBidAdjMap = new Map<string, number>();
+      const prodColCheck = await sqlClient`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 's_products_placement' AND column_name = 'bid_adjustment_pct'
+      `;
+      if (prodColCheck.length > 0) {
+        const latestProdBidAdj = await sqlClient`
+          SELECT DISTINCT ON ("campaignId", "placementClassification")
+            "campaignId"::text as campaign_id,
+            "placementClassification" as placement,
+            COALESCE(NULLIF(bid_adjustment_pct, '')::numeric, 0) as bid_adj
+          FROM s_products_placement
+          WHERE country = ${country as string}
+            AND "placementClassification" IS NOT NULL
+            AND bid_adjustment_pct IS NOT NULL AND bid_adjustment_pct != ''
+          ORDER BY "campaignId", "placementClassification", date DESC
+        `;
+        for (const row of latestProdBidAdj) {
+          prodBidAdjMap.set(`${row.campaign_id}|${row.placement}`, Number(row.bid_adj));
+        }
+      }
+
       const recommendations: any[] = [];
 
-      for (const p of placementData) {
-        const campaignTarget = acosTargetsMap.get(p.campaign_id);
-        if (!campaignTarget) continue;
+      // Helper to process placement rows into recommendations
+      const processPlacementRows = (rows: any[], bidAdjMap: Map<string, number>, type: string) => {
+        for (const p of rows) {
+          const campaignTarget = acosTargetsMap.get(p.campaign_id);
+          if (!campaignTarget) continue;
 
-        const targetAcos = campaignTarget.target * 100; // Convert to percentage
-        const clicks = Number(p.clicks);
-        const cost = Number(p.cost);
-        const sales = Number(p.sales);
-        const currentAdjustment = 0; // Default - actual value not in raw data
-        
-        if (clicks < MIN_CLICKS) continue;
-        
-        // Calculate ACOS (999 = high clicks but no sales = problem)
-        const acos = sales > 0 ? (cost / sales) * 100 : (clicks >= MIN_CLICKS ? 999 : null);
-        if (acos === null) continue;
+          const targetAcos = campaignTarget.target * 100;
+          const clicks = Number(p.clicks);
+          const cost = Number(p.cost);
+          const sales = Number(p.sales);
+          const currentAdjustment = bidAdjMap.get(`${p.campaign_id}|${p.placement}`) ?? 0;
 
-        // Skip if ACOS is within target window (±10%)
-        if (acos !== 999 && acos >= targetAcos - ACOS_WINDOW && acos <= targetAcos + ACOS_WINDOW) {
-          continue;
+          if (clicks < MIN_CLICKS) continue;
+
+          const acos = sales > 0 ? (cost / sales) * 100 : (clicks >= MIN_CLICKS ? 999 : null);
+          if (acos === null) continue;
+
+          if (acos !== 999 && acos >= targetAcos - ACOS_WINDOW && acos <= targetAcos + ACOS_WINDOW) {
+            continue;
+          }
+
+          let targetAdjustment: number | null = null;
+
+          if (acos !== 999 && acos > 0) {
+            const multiplier = targetAcos / acos;
+            const adjustmentChange = Math.round((multiplier - 1) * 50);
+            targetAdjustment = Math.max(0, Math.min(900, currentAdjustment + adjustmentChange));
+            targetAdjustment = Math.round(targetAdjustment / 5) * 5;
+          } else if (acos === 999) {
+            targetAdjustment = Math.max(0, currentAdjustment - 25);
+            targetAdjustment = Math.round(targetAdjustment / 5) * 5;
+          }
+
+          if (targetAdjustment === null || targetAdjustment === currentAdjustment) continue;
+
+          let confidence = 'Low';
+          if (clicks >= 200) confidence = 'Extreme';
+          else if (clicks >= 100) confidence = 'High';
+          else if (clicks >= 50) confidence = 'Good';
+          else if (clicks >= MIN_CLICKS) confidence = 'OK';
+
+          const action = acos > targetAcos ? 'decrease' : 'increase';
+
+          recommendations.push({
+            campaignId: p.campaign_id,
+            campaignName: p.campaign_name,
+            placement: p.placement,
+            biddingStrategy: 'N/A',
+            currentAdjustment,
+            recommendedAdjustment: targetAdjustment,
+            change: targetAdjustment - currentAdjustment,
+            clicks,
+            cost,
+            sales,
+            acos: acos === 999 ? null : acos / 100,
+            targetAcos: campaignTarget.target,
+            confidence,
+            type,
+            reason: `Placement ACOS (${acos === 999 ? 'No Sales' : acos.toFixed(1) + '%'}) ${action === 'decrease' ? 'exceeds' : 'below'} target range (${(targetAcos - ACOS_WINDOW).toFixed(0)}%-${(targetAcos + ACOS_WINDOW).toFixed(0)}%)`
+          });
         }
+      };
 
-        // Calculate target bid adjustment (never below 0%)
-        let targetAdjustment: number | null = null;
-        
-        if (acos !== 999 && acos > 0) {
-          const multiplier = targetAcos / acos;
-          const adjustmentChange = Math.round((multiplier - 1) * 50);
-          targetAdjustment = Math.max(0, Math.min(900, currentAdjustment + adjustmentChange));
-          targetAdjustment = Math.round(targetAdjustment / 5) * 5;
-        } else if (acos === 999) {
-          targetAdjustment = Math.max(0, currentAdjustment - 25);
-          targetAdjustment = Math.round(targetAdjustment / 5) * 5;
+      processPlacementRows(placementData, prodBidAdjMap, 'products');
+
+      // --- Brand Placements ---
+      try {
+        const brandCols = await sqlClient`
+          SELECT column_name FROM information_schema.columns
+          WHERE table_name = 's_brand_placement'
+        `;
+        const brandColNames = new Set(brandCols.map((c: any) => c.column_name));
+
+        if (brandColNames.size > 0) {
+          const bCampaignIdCol = brandColNames.has('campaignId') ? '"campaignId"' : 'campaign_id';
+          const bCampaignNameCol = brandColNames.has('campaignName') ? '"campaignName"' : 'campaign_name';
+          const bHasPlacement = brandColNames.has('placement_classification');
+          const bPlacementCol = bHasPlacement ? "COALESCE(placement_classification, 'Brand')" : "'Brand'";
+          const bSalesCol = brandColNames.has('sales_14d') ? 'sales_14d' : (brandColNames.has('sales') ? 'sales' : '0');
+          const bPurchasesCol = brandColNames.has('purchases_14d') ? 'purchases_14d' : (brandColNames.has('purchases') ? 'purchases' : '0');
+          const bHasBidAdj = brandColNames.has('bid_adjustment_pct');
+
+          const bGroupBy = bHasPlacement
+            ? `${bCampaignIdCol}, ${bCampaignNameCol}, placement_classification`
+            : `${bCampaignIdCol}, ${bCampaignNameCol}`;
+
+          const campaignFilter = campaignId ? `AND ${bCampaignIdCol}::text = $2` : '';
+          const params: any[] = [country as string];
+          if (campaignId) params.push(campaignId as string);
+          const minClicksParam = `$${params.length + 1}`;
+          params.push(MIN_CLICKS);
+
+          const brandData = await sqlClient.unsafe(`
+            SELECT
+              ${bCampaignIdCol}::text as campaign_id,
+              ${bCampaignNameCol} as campaign_name,
+              ${bPlacementCol} as placement,
+              COALESCE(SUM(impressions), 0) as impressions,
+              COALESCE(SUM(clicks), 0) as clicks,
+              COALESCE(SUM(cost::numeric), 0) as cost,
+              COALESCE(SUM(${bSalesCol}::numeric), 0) as sales,
+              COALESCE(SUM(${bPurchasesCol}::numeric), 0) as orders
+            FROM s_brand_placement
+            WHERE country = $1
+              ${bHasPlacement ? "AND placement_classification IS NOT NULL" : ""}
+              ${campaignFilter}
+            GROUP BY ${bGroupBy}
+            HAVING COALESCE(SUM(clicks), 0) >= ${minClicksParam}
+            ORDER BY COALESCE(SUM(cost::numeric), 0) DESC
+          `, params);
+
+          // Get latest bid_adjustment_pct for brand placements
+          const brandBidAdjMap = new Map<string, number>();
+          if (bHasBidAdj) {
+            const bDistinctOn = bHasPlacement
+              ? `${bCampaignIdCol}, placement_classification`
+              : bCampaignIdCol;
+            const bOrderBy = bHasPlacement
+              ? `${bCampaignIdCol}, placement_classification, date DESC`
+              : `${bCampaignIdCol}, date DESC`;
+
+            const latestBrandBidAdj = await sqlClient.unsafe(`
+              SELECT DISTINCT ON (${bDistinctOn})
+                ${bCampaignIdCol}::text as campaign_id,
+                ${bPlacementCol} as placement,
+                COALESCE(bid_adjustment_pct::numeric, 0) as bid_adj
+              FROM s_brand_placement
+              WHERE country = $1
+                AND bid_adjustment_pct IS NOT NULL
+              ORDER BY ${bOrderBy}
+            `, [country as string]);
+
+            for (const row of latestBrandBidAdj) {
+              brandBidAdjMap.set(`${row.campaign_id}|${row.placement}`, Number(row.bid_adj));
+            }
+          }
+
+          processPlacementRows(brandData, brandBidAdjMap, 'brands');
         }
-        
-        if (targetAdjustment === null || targetAdjustment === currentAdjustment) continue;
-
-        // Determine confidence
-        let confidence = 'Low';
-        if (clicks >= 200) confidence = 'Extreme';
-        else if (clicks >= 100) confidence = 'High';
-        else if (clicks >= 50) confidence = 'Good';
-        else if (clicks >= MIN_CLICKS) confidence = 'OK';
-
-        const action = acos > targetAcos ? 'decrease' : 'increase';
-
-        recommendations.push({
-          campaignId: p.campaign_id,
-          campaignName: p.campaign_name,
-          placement: p.placement,
-          biddingStrategy: 'N/A',
-          currentAdjustment,
-          recommendedAdjustment: targetAdjustment,
-          change: targetAdjustment - currentAdjustment,
-          clicks,
-          cost,
-          sales,
-          acos: acos === 999 ? null : acos / 100,
-          targetAcos: campaignTarget.target,
-          confidence,
-          reason: `Placement ACOS (${acos === 999 ? 'No Sales' : acos.toFixed(1) + '%'}) ${action === 'decrease' ? 'exceeds' : 'below'} target range (${(targetAcos - ACOS_WINDOW).toFixed(0)}%-${(targetAcos + ACOS_WINDOW).toFixed(0)}%)`
-        });
+      } catch (brandError) {
+        console.warn('[placement-bidding-strategy] Could not fetch brand placements:', brandError);
       }
 
       await sqlClient.end();
@@ -2909,18 +2987,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const d365WeightPct = Math.round(weights.d365_weight * 100);
       const lifetimeWeightPct = Math.round(weights.lifetime_weight * 100);
 
-      // First try recommendation_history, fallback to live API
+      // First try recommendation_history (deduplicated — only most recent per unique key), fallback to live API
       let keywordRecs: any[] = [];
       let placementRecs: any[] = [];
-      
-      // Try to get from recommendation_history first
+
+      // Get only the most recent recommendation per unique (campaign_id, ad_group_id, targeting, match_type, recommendation_type)
       const historyQuery = campaignIdFilter
-        ? sql`SELECT * FROM recommendation_history WHERE country = ${countryStr} AND campaign_id = ${campaignIdFilter} AND created_at >= NOW() - INTERVAL '7 days' ORDER BY created_at DESC`
-        : sql`SELECT * FROM recommendation_history WHERE country = ${countryStr} AND created_at >= NOW() - INTERVAL '7 days' ORDER BY created_at DESC`;
-      
+        ? sql`SELECT DISTINCT ON (campaign_id, COALESCE(ad_group_id, ''), targeting, COALESCE(match_type, ''), recommendation_type) *
+              FROM recommendation_history
+              WHERE country = ${countryStr} AND campaign_id = ${campaignIdFilter}
+              ORDER BY campaign_id, COALESCE(ad_group_id, ''), targeting, COALESCE(match_type, ''), recommendation_type, created_at DESC`
+        : sql`SELECT DISTINCT ON (campaign_id, COALESCE(ad_group_id, ''), targeting, COALESCE(match_type, ''), recommendation_type) *
+              FROM recommendation_history
+              WHERE country = ${countryStr}
+              ORDER BY campaign_id, COALESCE(ad_group_id, ''), targeting, COALESCE(match_type, ''), recommendation_type, created_at DESC`;
+
       const historyRecs = await db.execute(historyQuery);
       keywordRecs = (historyRecs as any[]).filter((r: any) => r.recommendation_type === 'keyword_bid');
-      placementRecs = (historyRecs as any[]).filter((r: any) => r.recommendation_type === 'placement_adjustment');
+      placementRecs = (historyRecs as any[]).filter((r: any) =>
+        r.recommendation_type === 'placement_adjustment' ||
+        r.recommendation_type === 'brand_placement_adjustment'
+      );
       
       // If no recommendations in history, fetch live from bidding-strategy API
       if (keywordRecs.length === 0) {
@@ -2974,6 +3061,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             campaign_name: rec.campaignName,
             targeting: rec.placement,
             match_type: rec.biddingStrategy,
+            recommendation_type: rec.type === 'brands' ? 'brand_placement_adjustment' : 'placement_adjustment',
             old_value: rec.currentAdjustment,
             recommended_value: rec.recommendedAdjustment,
             weighted_acos: rec.acos,
@@ -2989,144 +3077,260 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const campaignsWithPlacements = new Set(
         (placementRecs as any[]).map((r: any) => r.campaign_id)
       );
-      
+
       // Build set of campaigns with keyword recommendations
       const campaignsWithKeywords = new Set(
         (keywordRecs as any[]).map((r: any) => r.campaign_id)
       );
 
-      // Create keyword recommendations sheet
-      const keywordData = (keywordRecs as any[]).map((rec: any) => {
-        const hasBoth = campaignsWithPlacements.has(rec.campaign_id);
-        const timeframesUsed: string[] = [];
-        if (rec.pre_acos_t0 !== null && rec.pre_acos_t0 !== undefined) timeframesUsed.push('T0');
-        if (rec.pre_acos_30d !== null && rec.pre_acos_30d !== undefined) timeframesUsed.push('30D');
-        if (rec.pre_acos_365d !== null && rec.pre_acos_365d !== undefined) timeframesUsed.push('365D');
-        if (rec.pre_acos_lifetime !== null && rec.pre_acos_lifetime !== undefined) timeframesUsed.push('Lifetime');
-        
-        const oldVal = Number(rec.old_value) || 0;
-        const newVal = Number(rec.recommended_value) || 0;
-        const changePercent = oldVal > 0 
-          ? Math.round(((newVal - oldVal) / oldVal) * 100)
-          : 0;
-        
-        const acosTarget = Number(rec.acos_target) || 0;
-        const weightedAcos = Number(rec.weighted_acos) || 0;
-        
-        // Calculate CPC values (Cost Per Click)
-        const calcCpc = (cost: number | null, clicks: number | null) => {
-          if (cost === null || clicks === null || clicks === 0) return null;
-          return Number(cost) / Number(clicks);
-        };
-        
-        const d30Clicks = Number(rec.pre_clicks_30d) || 0;
-        const d30Cost = Number(rec.pre_cost_30d) || 0;
-        const d30Orders = Number(rec.pre_orders_30d) || 0;
-        const d30Cpc = calcCpc(d30Cost, d30Clicks);
-        
-        const t0Clicks = Number(rec.pre_clicks_t0) || 0;
-        const t0Cost = Number(rec.pre_cost_t0) || 0;
-        const t0Orders = Number(rec.pre_orders_t0) || 0;
-        const t0Cpc = calcCpc(t0Cost, t0Clicks);
-        
-        const d365Clicks = Number(rec.pre_clicks_365d) || 0;
-        const d365Cost = Number(rec.pre_cost_365d) || 0;
-        const d365Orders = Number(rec.pre_orders_365d) || 0;
-        const d365Cpc = calcCpc(d365Cost, d365Clicks);
-        
-        const lifetimeClicks = Number(rec.pre_clicks_lifetime) || 0;
-        const lifetimeCost = Number(rec.pre_cost_lifetime) || 0;
-        const lifetimeOrders = Number(rec.pre_orders_lifetime) || 0;
-        const lifetimeCpc = calcCpc(lifetimeCost, lifetimeClicks);
-        
-        return {
-          'NEEDS BOTH ADJUSTMENTS': hasBoth ? 'YES - ALSO CHECK PLACEMENTS' : '',
-          'Country': rec.country,
-          'Campaign Name': rec.campaign_name,
-          'Ad Group Name': rec.ad_group_name || '',
-          'Targeting': rec.targeting,
-          'Match Type': rec.match_type,
-          'Current Bid': `€${oldVal.toFixed(2)}`,
-          'Recommended Bid': `€${newVal.toFixed(2)}`,
-          'Change %': `${changePercent}%`,
-          'Action': newVal > oldVal ? 'increase' : 'decrease',
-          'ACOS Target': `${Math.round(acosTarget * 100)}%`,
-          'Weighted ACOS': `${Math.round(weightedAcos * 100)}%`,
-          'Confidence': rec.confidence || '',
-          '30D Clicks': d30Clicks,
-          '30D CPC': d30Cpc !== null ? `€${d30Cpc.toFixed(2)}` : 'N/A',
-          '30D Spend': `€${d30Cost.toFixed(2)}`,
-          '30D Orders': d30Orders,
-          '30D ACOS': rec.pre_acos_30d != null ? `${Math.round(Number(rec.pre_acos_30d) * 100)}%` : 'N/A',
-          'T0 Clicks': t0Clicks,
-          'T0 CPC': t0Cpc !== null ? `€${t0Cpc.toFixed(2)}` : 'N/A',
-          'T0 Spend': `€${t0Cost.toFixed(2)}`,
-          'T0 Orders': t0Orders,
-          'T0 ACOS': rec.pre_acos_t0 != null ? `${Math.round(Number(rec.pre_acos_t0) * 100)}%` : 'N/A',
-          '365D Clicks': d365Clicks,
-          '365D CPC': d365Cpc !== null ? `€${d365Cpc.toFixed(2)}` : 'N/A',
-          '365D Spend': `€${d365Cost.toFixed(2)}`,
-          '365D Orders': d365Orders,
-          '365D ACOS': rec.pre_acos_365d != null ? `${Math.round(Number(rec.pre_acos_365d) * 100)}%` : 'N/A',
-          'Lifetime Clicks': lifetimeClicks,
-          'Lifetime CPC': lifetimeCpc !== null ? `€${lifetimeCpc.toFixed(2)}` : 'N/A',
-          'Lifetime Spend': `€${lifetimeCost.toFixed(2)}`,
-          'Lifetime Orders': lifetimeOrders,
-          'Lifetime ACOS': rec.pre_acos_lifetime != null ? `${Math.round(Number(rec.pre_acos_lifetime) * 100)}%` : 'N/A',
-          'Reason': rec.reason || ''
-        };
-      });
+      // === Build combined "Bid Adjustments" sheet ===
+      // Order: Campaign A-Z → 3 Placement rows first → Keywords by Ad Group A-Z → Spend high-low
 
-      // Create placement recommendations sheet
-      const placementData = (placementRecs as any[]).map((rec: any) => {
-        const hasBoth = campaignsWithKeywords.has(rec.campaign_id);
-        
-        // Ensure recommended adjustment is never below 0%
-        const recommendedAdj = Math.max(0, Number(rec.recommended_value) || 0);
-        const currentAdj = Number(rec.old_value) || 0;
-        const change = recommendedAdj - currentAdj;
-        
-        return {
-          'NEEDS BOTH ADJUSTMENTS': hasBoth ? 'YES - ALSO CHECK KEYWORDS' : '',
-          'Country': rec.country,
-          'Campaign Name': rec.campaign_name,
-          'Placement': rec.targeting,
-          'Bidding Strategy': rec.match_type || 'N/A',
-          'Current Adjustment': `${currentAdj}%`,
-          'Recommended Adjustment': `${recommendedAdj}%`,
-          'Change': `${change > 0 ? '+' : ''}${change}%`,
-          'Clicks': rec.pre_clicks_lifetime || 0,
-          'ACOS': rec.weighted_acos ? `${Math.round(rec.weighted_acos * 100)}%` : 'N/A',
-          'Target ACOS': `${Math.round((rec.acos_target || 0) * 100)}%`,
-          'Confidence': rec.confidence || '',
-          'Reason': rec.reason || ''
-        };
-      });
-
-      // Add sheets to workbook
-      if (keywordData.length > 0) {
-        const wsKeywords = XLSX.utils.json_to_sheet(keywordData);
-        XLSX.utils.book_append_sheet(wb, wsKeywords, 'Keyword Bid Changes');
+      // Collect all unique campaigns from both keyword and placement recs
+      const allCampaigns = new Map<string, string>();
+      for (const rec of keywordRecs as any[]) {
+        allCampaigns.set(rec.campaign_id, rec.campaign_name);
+      }
+      for (const rec of placementRecs as any[]) {
+        allCampaigns.set(rec.campaign_id, rec.campaign_name);
       }
 
-      if (placementData.length > 0) {
-        const wsPlacements = XLSX.utils.json_to_sheet(placementData);
-        XLSX.utils.book_append_sheet(wb, wsPlacements, 'Placement Adjustments');
+      // Sort campaigns by name A-Z
+      const sortedCampaigns = Array.from(allCampaigns.entries())
+        .sort((a, b) => (a[1] || '').localeCompare(b[1] || ''));
+
+      // Standard 3 placement categories (in display order)
+      const STANDARD_PLACEMENTS = [
+        'Top of Search (first page)',
+        'Product Page',
+        'Rest of Search'
+      ];
+
+      // Normalize any placement name to one of the 3 standard categories
+      const normalizePlacement = (name: string): string => {
+        const lower = (name || '').toLowerCase();
+        if (lower.includes('top') && lower.includes('search')) return 'Top of Search (first page)';
+        if (lower.includes('detail') || lower.includes('product')) return 'Product Page';
+        return 'Rest of Search';
+      };
+
+      // Helper: CPC calculation
+      const calcCpc = (cost: number | null, clicks: number | null) => {
+        if (cost === null || clicks === null || clicks === 0) return null;
+        return Number(cost) / Number(clicks);
+      };
+
+      const combinedData: any[] = [];
+      let keywordRowCount = 0;
+      let placementChangeCount = 0;
+
+      for (const [campaignId, campaignName] of sortedCampaigns) {
+        // --- 1. Placement rows (always 3 per campaign, on top) ---
+        const campaignPlacements = (placementRecs as any[]).filter((r: any) => r.campaign_id === campaignId);
+
+        // Map existing placements by their normalized category
+        const placementByCategory = new Map<string, any>();
+        for (const rec of campaignPlacements) {
+          const category = normalizePlacement(rec.targeting);
+          if (!placementByCategory.has(category) ||
+              (Number(rec.pre_clicks_lifetime) || 0) > (Number(placementByCategory.get(category).pre_clicks_lifetime) || 0)) {
+            placementByCategory.set(category, rec);
+          }
+        }
+
+        // Create exactly 3 placement rows per campaign
+        for (const placementName of STANDARD_PLACEMENTS) {
+          const existingRec = placementByCategory.get(placementName);
+
+          if (existingRec) {
+            const recommendedAdj = Math.max(0, Number(existingRec.recommended_value) || 0);
+            const currentAdj = Number(existingRec.old_value) || 0;
+            const change = recommendedAdj - currentAdj;
+            placementChangeCount++;
+
+            combinedData.push({
+              'Type': existingRec.recommendation_type === 'brand_placement_adjustment' ? 'Placement (Sponsored Brands)' : 'Placement (Sponsored Products)',
+              'Country': existingRec.country,
+              'Campaign Name': existingRec.campaign_name,
+              'Ad Group Name': '',
+              'Targeting': placementName,
+              'Match Type': '',
+              'Current Bid': '',
+              'Recommended Bid': '',
+              'Current Adjustment': `${currentAdj}%`,
+              'Recommended Adjustment': `${recommendedAdj}%`,
+              'Change %': `${change > 0 ? '+' : ''}${change}%`,
+              'Action': change > 0 ? 'increase' : change < 0 ? 'decrease' : 'no change',
+              'ACOS Target': `${Math.round((existingRec.acos_target || 0) * 100)}%`,
+              'Weighted ACOS': existingRec.weighted_acos ? `${Math.round(existingRec.weighted_acos * 100)}%` : 'N/A',
+              'Confidence': existingRec.confidence || '',
+              '30D Clicks': '',
+              '30D CPC': '',
+              '30D Spend': '',
+              '30D Orders': '',
+              '30D ACOS': '',
+              'T0 Clicks': '',
+              'T0 CPC': '',
+              'T0 Spend': '',
+              'T0 Orders': '',
+              'T0 ACOS': '',
+              '365D Clicks': '',
+              '365D CPC': '',
+              '365D Spend': '',
+              '365D Orders': '',
+              '365D ACOS': '',
+              'Lifetime Clicks': existingRec.pre_clicks_lifetime || 0,
+              'Lifetime CPC': '',
+              'Lifetime Spend': '',
+              'Lifetime Orders': '',
+              'Lifetime ACOS': '',
+              'Reason': existingRec.reason || ''
+            });
+          } else {
+            // No recommendation for this placement — show "no change" row
+            combinedData.push({
+              'Type': 'Placement',
+              'Country': countryStr,
+              'Campaign Name': campaignName,
+              'Ad Group Name': '',
+              'Targeting': placementName,
+              'Match Type': '',
+              'Current Bid': '',
+              'Recommended Bid': '',
+              'Current Adjustment': '',
+              'Recommended Adjustment': 'No change',
+              'Change %': '0%',
+              'Action': 'no change',
+              'ACOS Target': '',
+              'Weighted ACOS': '',
+              'Confidence': '',
+              '30D Clicks': '',
+              '30D CPC': '',
+              '30D Spend': '',
+              '30D Orders': '',
+              '30D ACOS': '',
+              'T0 Clicks': '',
+              'T0 CPC': '',
+              'T0 Spend': '',
+              'T0 Orders': '',
+              'T0 ACOS': '',
+              '365D Clicks': '',
+              '365D CPC': '',
+              '365D Spend': '',
+              '365D Orders': '',
+              '365D ACOS': '',
+              'Lifetime Clicks': '',
+              'Lifetime CPC': '',
+              'Lifetime Spend': '',
+              'Lifetime Orders': '',
+              'Lifetime ACOS': '',
+              'Reason': 'No change recommended'
+            });
+          }
+        }
+
+        // --- 2. Keyword rows (sorted by Ad Group A-Z, then 30D Spend high-low) ---
+        const campaignKeywords = (keywordRecs as any[])
+          .filter((r: any) => r.campaign_id === campaignId)
+          .sort((a: any, b: any) => {
+            const adGroupCompare = (a.ad_group_name || '').localeCompare(b.ad_group_name || '');
+            if (adGroupCompare !== 0) return adGroupCompare;
+            const aSpend = Number(a.pre_cost_30d) || Number(a.pre_cost_lifetime) || 0;
+            const bSpend = Number(b.pre_cost_30d) || Number(b.pre_cost_lifetime) || 0;
+            return bSpend - aSpend;
+          });
+
+        for (const rec of campaignKeywords) {
+          keywordRowCount++;
+          const oldVal = Number(rec.old_value) || 0;
+          const newVal = Number(rec.recommended_value) || 0;
+          const changePercent = oldVal > 0
+            ? Math.round(((newVal - oldVal) / oldVal) * 100)
+            : 0;
+
+          const acosTarget = Number(rec.acos_target) || 0;
+          const weightedAcos = Number(rec.weighted_acos) || 0;
+
+          const d30Clicks = Number(rec.pre_clicks_30d) || 0;
+          const d30Cost = Number(rec.pre_cost_30d) || 0;
+          const d30Orders = Number(rec.pre_orders_30d) || 0;
+          const d30Cpc = calcCpc(d30Cost, d30Clicks);
+
+          const t0Clicks = Number(rec.pre_clicks_t0) || 0;
+          const t0Cost = Number(rec.pre_cost_t0) || 0;
+          const t0Orders = Number(rec.pre_orders_t0) || 0;
+          const t0Cpc = calcCpc(t0Cost, t0Clicks);
+
+          const d365Clicks = Number(rec.pre_clicks_365d) || 0;
+          const d365Cost = Number(rec.pre_cost_365d) || 0;
+          const d365Orders = Number(rec.pre_orders_365d) || 0;
+          const d365Cpc = calcCpc(d365Cost, d365Clicks);
+
+          const lifetimeClicks = Number(rec.pre_clicks_lifetime) || 0;
+          const lifetimeCost = Number(rec.pre_cost_lifetime) || 0;
+          const lifetimeOrders = Number(rec.pre_orders_lifetime) || 0;
+          const lifetimeCpc = calcCpc(lifetimeCost, lifetimeClicks);
+
+          combinedData.push({
+            'Type': 'Keyword Bid',
+            'Country': rec.country,
+            'Campaign Name': rec.campaign_name,
+            'Ad Group Name': rec.ad_group_name || '',
+            'Targeting': rec.targeting,
+            'Match Type': rec.match_type,
+            'Current Bid': `€${oldVal.toFixed(2)}`,
+            'Recommended Bid': `€${newVal.toFixed(2)}`,
+            'Current Adjustment': '',
+            'Recommended Adjustment': '',
+            'Change %': `${changePercent}%`,
+            'Action': newVal > oldVal ? 'increase' : 'decrease',
+            'ACOS Target': `${Math.round(acosTarget * 100)}%`,
+            'Weighted ACOS': `${Math.round(weightedAcos * 100)}%`,
+            'Confidence': rec.confidence || '',
+            '30D Clicks': d30Clicks,
+            '30D CPC': d30Cpc !== null ? `€${d30Cpc.toFixed(2)}` : 'N/A',
+            '30D Spend': `€${d30Cost.toFixed(2)}`,
+            '30D Orders': d30Orders,
+            '30D ACOS': rec.pre_acos_30d != null ? `${Math.round(Number(rec.pre_acos_30d) * 100)}%` : 'N/A',
+            'T0 Clicks': t0Clicks,
+            'T0 CPC': t0Cpc !== null ? `€${t0Cpc.toFixed(2)}` : 'N/A',
+            'T0 Spend': `€${t0Cost.toFixed(2)}`,
+            'T0 Orders': t0Orders,
+            'T0 ACOS': rec.pre_acos_t0 != null ? `${Math.round(Number(rec.pre_acos_t0) * 100)}%` : 'N/A',
+            '365D Clicks': d365Clicks,
+            '365D CPC': d365Cpc !== null ? `€${d365Cpc.toFixed(2)}` : 'N/A',
+            '365D Spend': `€${d365Cost.toFixed(2)}`,
+            '365D Orders': d365Orders,
+            '365D ACOS': rec.pre_acos_365d != null ? `${Math.round(Number(rec.pre_acos_365d) * 100)}%` : 'N/A',
+            'Lifetime Clicks': lifetimeClicks,
+            'Lifetime CPC': lifetimeCpc !== null ? `€${lifetimeCpc.toFixed(2)}` : 'N/A',
+            'Lifetime Spend': `€${lifetimeCost.toFixed(2)}`,
+            'Lifetime Orders': lifetimeOrders,
+            'Lifetime ACOS': rec.pre_acos_lifetime != null ? `${Math.round(Number(rec.pre_acos_lifetime) * 100)}%` : 'N/A',
+            'Reason': rec.reason || ''
+          });
+        }
+      }
+
+      // Add combined Bid Adjustments sheet to workbook
+      if (combinedData.length > 0) {
+        const wsCombined = XLSX.utils.json_to_sheet(combinedData);
+        XLSX.utils.book_append_sheet(wb, wsCombined, 'Bid Adjustments');
       }
 
       // Add summary sheet with campaigns needing both adjustments
       const campaignsNeedingBoth = Array.from(campaignsWithPlacements)
         .filter(cId => campaignsWithKeywords.has(cId as string));
-      
+
       if (campaignsNeedingBoth.length > 0) {
         const bothData = campaignsNeedingBoth.map(cId => {
           const keywordCount = (keywordRecs as any[]).filter(r => r.campaign_id === cId).length;
           const placementCount = (placementRecs as any[]).filter(r => r.campaign_id === cId).length;
-          const campaignName = (keywordRecs as any[]).find(r => r.campaign_id === cId)?.campaign_name || 
-                              (placementRecs as any[]).find(r => r.campaign_id === cId)?.campaign_name || cId;
+          const cName = (keywordRecs as any[]).find(r => r.campaign_id === cId)?.campaign_name ||
+                        (placementRecs as any[]).find(r => r.campaign_id === cId)?.campaign_name || cId;
           return {
             'Campaign ID': cId,
-            'Campaign Name': campaignName,
+            'Campaign Name': cName,
             'Keyword Bid Changes': keywordCount,
             'Placement Adjustments': placementCount,
             'Total Changes Needed': keywordCount + placementCount,
@@ -3146,16 +3350,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         '30D Weight': `${d30WeightPct}%`,
         '365D Weight': `${d365WeightPct}%`,
         'Lifetime Weight': `${lifetimeWeightPct}%`,
-        'Total Keyword Changes': keywordData.length,
-        'Total Placement Changes': placementData.length,
+        'Total Keyword Changes': keywordRowCount,
+        'Total Placement Changes': placementChangeCount,
+        'Total Campaigns': sortedCampaigns.length,
         'Campaigns Needing Both': campaignsNeedingBoth.length,
-        'Note': 'Recommendations generated daily at 3:00 AM UTC. Items marked "NEEDS BOTH ADJUSTMENTS" require attention in both sheets.'
+        'Note': 'Combined sheet sorted by Campaign (A-Z). Per campaign: 3 placement rows first, then keyword bids sorted by Ad Group (A-Z) and Spend (high-low).'
       }];
       const wsMetadata = XLSX.utils.json_to_sheet(metadataData);
       XLSX.utils.book_append_sheet(wb, wsMetadata, 'Export Info');
 
       // If no recommendations found
-      if (keywordData.length === 0 && placementData.length === 0) {
+      if (combinedData.length === 0) {
         const emptyData = [{
           'Message': 'No recommendations found for the selected filters',
           'Country': countryStr,
@@ -3167,7 +3372,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-      const filename = campaignIdFilter 
+      const filename = campaignIdFilter
         ? `bid-recommendations-${countryStr}-campaign-${new Date().toISOString().split('T')[0]}.xlsx`
         : `bid-recommendations-${countryStr}-${new Date().toISOString().split('T')[0]}.xlsx`;
 
