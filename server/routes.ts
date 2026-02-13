@@ -3077,145 +3077,260 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const campaignsWithPlacements = new Set(
         (placementRecs as any[]).map((r: any) => r.campaign_id)
       );
-      
+
       // Build set of campaigns with keyword recommendations
       const campaignsWithKeywords = new Set(
         (keywordRecs as any[]).map((r: any) => r.campaign_id)
       );
 
-      // Create keyword recommendations sheet
-      const keywordData = (keywordRecs as any[]).map((rec: any) => {
-        const hasBoth = campaignsWithPlacements.has(rec.campaign_id);
-        const timeframesUsed: string[] = [];
-        if (rec.pre_acos_t0 !== null && rec.pre_acos_t0 !== undefined) timeframesUsed.push('T0');
-        if (rec.pre_acos_30d !== null && rec.pre_acos_30d !== undefined) timeframesUsed.push('30D');
-        if (rec.pre_acos_365d !== null && rec.pre_acos_365d !== undefined) timeframesUsed.push('365D');
-        if (rec.pre_acos_lifetime !== null && rec.pre_acos_lifetime !== undefined) timeframesUsed.push('Lifetime');
-        
-        const oldVal = Number(rec.old_value) || 0;
-        const newVal = Number(rec.recommended_value) || 0;
-        const changePercent = oldVal > 0 
-          ? Math.round(((newVal - oldVal) / oldVal) * 100)
-          : 0;
-        
-        const acosTarget = Number(rec.acos_target) || 0;
-        const weightedAcos = Number(rec.weighted_acos) || 0;
-        
-        // Calculate CPC values (Cost Per Click)
-        const calcCpc = (cost: number | null, clicks: number | null) => {
-          if (cost === null || clicks === null || clicks === 0) return null;
-          return Number(cost) / Number(clicks);
-        };
-        
-        const d30Clicks = Number(rec.pre_clicks_30d) || 0;
-        const d30Cost = Number(rec.pre_cost_30d) || 0;
-        const d30Orders = Number(rec.pre_orders_30d) || 0;
-        const d30Cpc = calcCpc(d30Cost, d30Clicks);
-        
-        const t0Clicks = Number(rec.pre_clicks_t0) || 0;
-        const t0Cost = Number(rec.pre_cost_t0) || 0;
-        const t0Orders = Number(rec.pre_orders_t0) || 0;
-        const t0Cpc = calcCpc(t0Cost, t0Clicks);
-        
-        const d365Clicks = Number(rec.pre_clicks_365d) || 0;
-        const d365Cost = Number(rec.pre_cost_365d) || 0;
-        const d365Orders = Number(rec.pre_orders_365d) || 0;
-        const d365Cpc = calcCpc(d365Cost, d365Clicks);
-        
-        const lifetimeClicks = Number(rec.pre_clicks_lifetime) || 0;
-        const lifetimeCost = Number(rec.pre_cost_lifetime) || 0;
-        const lifetimeOrders = Number(rec.pre_orders_lifetime) || 0;
-        const lifetimeCpc = calcCpc(lifetimeCost, lifetimeClicks);
-        
-        return {
-          'NEEDS BOTH ADJUSTMENTS': hasBoth ? 'YES - ALSO CHECK PLACEMENTS' : '',
-          'Country': rec.country,
-          'Campaign Name': rec.campaign_name,
-          'Ad Group Name': rec.ad_group_name || '',
-          'Targeting': rec.targeting,
-          'Match Type': rec.match_type,
-          'Current Bid': `€${oldVal.toFixed(2)}`,
-          'Recommended Bid': `€${newVal.toFixed(2)}`,
-          'Change %': `${changePercent}%`,
-          'Action': newVal > oldVal ? 'increase' : 'decrease',
-          'ACOS Target': `${Math.round(acosTarget * 100)}%`,
-          'Weighted ACOS': `${Math.round(weightedAcos * 100)}%`,
-          'Confidence': rec.confidence || '',
-          '30D Clicks': d30Clicks,
-          '30D CPC': d30Cpc !== null ? `€${d30Cpc.toFixed(2)}` : 'N/A',
-          '30D Spend': `€${d30Cost.toFixed(2)}`,
-          '30D Orders': d30Orders,
-          '30D ACOS': rec.pre_acos_30d != null ? `${Math.round(Number(rec.pre_acos_30d) * 100)}%` : 'N/A',
-          'T0 Clicks': t0Clicks,
-          'T0 CPC': t0Cpc !== null ? `€${t0Cpc.toFixed(2)}` : 'N/A',
-          'T0 Spend': `€${t0Cost.toFixed(2)}`,
-          'T0 Orders': t0Orders,
-          'T0 ACOS': rec.pre_acos_t0 != null ? `${Math.round(Number(rec.pre_acos_t0) * 100)}%` : 'N/A',
-          '365D Clicks': d365Clicks,
-          '365D CPC': d365Cpc !== null ? `€${d365Cpc.toFixed(2)}` : 'N/A',
-          '365D Spend': `€${d365Cost.toFixed(2)}`,
-          '365D Orders': d365Orders,
-          '365D ACOS': rec.pre_acos_365d != null ? `${Math.round(Number(rec.pre_acos_365d) * 100)}%` : 'N/A',
-          'Lifetime Clicks': lifetimeClicks,
-          'Lifetime CPC': lifetimeCpc !== null ? `€${lifetimeCpc.toFixed(2)}` : 'N/A',
-          'Lifetime Spend': `€${lifetimeCost.toFixed(2)}`,
-          'Lifetime Orders': lifetimeOrders,
-          'Lifetime ACOS': rec.pre_acos_lifetime != null ? `${Math.round(Number(rec.pre_acos_lifetime) * 100)}%` : 'N/A',
-          'Reason': rec.reason || ''
-        };
-      });
+      // === Build combined "Bid Adjustments" sheet ===
+      // Order: Campaign A-Z → 3 Placement rows first → Keywords by Ad Group A-Z → Spend high-low
 
-      // Create placement recommendations sheet
-      const placementData = (placementRecs as any[]).map((rec: any) => {
-        const hasBoth = campaignsWithKeywords.has(rec.campaign_id);
-        
-        // Ensure recommended adjustment is never below 0%
-        const recommendedAdj = Math.max(0, Number(rec.recommended_value) || 0);
-        const currentAdj = Number(rec.old_value) || 0;
-        const change = recommendedAdj - currentAdj;
-        
-        return {
-          'NEEDS BOTH ADJUSTMENTS': hasBoth ? 'YES - ALSO CHECK KEYWORDS' : '',
-          'Type': rec.recommendation_type === 'brand_placement_adjustment' ? 'Sponsored Brands' : 'Sponsored Products',
-          'Country': rec.country,
-          'Campaign Name': rec.campaign_name,
-          'Placement': rec.targeting,
-          'Bidding Strategy': rec.match_type || 'N/A',
-          'Current Adjustment': `${currentAdj}%`,
-          'Recommended Adjustment': `${recommendedAdj}%`,
-          'Change': `${change > 0 ? '+' : ''}${change}%`,
-          'Clicks': rec.pre_clicks_lifetime || 0,
-          'ACOS': rec.weighted_acos ? `${Math.round(rec.weighted_acos * 100)}%` : 'N/A',
-          'Target ACOS': `${Math.round((rec.acos_target || 0) * 100)}%`,
-          'Confidence': rec.confidence || '',
-          'Reason': rec.reason || ''
-        };
-      });
-
-      // Add sheets to workbook
-      if (keywordData.length > 0) {
-        const wsKeywords = XLSX.utils.json_to_sheet(keywordData);
-        XLSX.utils.book_append_sheet(wb, wsKeywords, 'Keyword Bid Changes');
+      // Collect all unique campaigns from both keyword and placement recs
+      const allCampaigns = new Map<string, string>();
+      for (const rec of keywordRecs as any[]) {
+        allCampaigns.set(rec.campaign_id, rec.campaign_name);
+      }
+      for (const rec of placementRecs as any[]) {
+        allCampaigns.set(rec.campaign_id, rec.campaign_name);
       }
 
-      if (placementData.length > 0) {
-        const wsPlacements = XLSX.utils.json_to_sheet(placementData);
-        XLSX.utils.book_append_sheet(wb, wsPlacements, 'Placement Adjustments');
+      // Sort campaigns by name A-Z
+      const sortedCampaigns = Array.from(allCampaigns.entries())
+        .sort((a, b) => (a[1] || '').localeCompare(b[1] || ''));
+
+      // Standard 3 placement categories (in display order)
+      const STANDARD_PLACEMENTS = [
+        'Top of Search (first page)',
+        'Product Page',
+        'Rest of Search'
+      ];
+
+      // Normalize any placement name to one of the 3 standard categories
+      const normalizePlacement = (name: string): string => {
+        const lower = (name || '').toLowerCase();
+        if (lower.includes('top') && lower.includes('search')) return 'Top of Search (first page)';
+        if (lower.includes('detail') || lower.includes('product')) return 'Product Page';
+        return 'Rest of Search';
+      };
+
+      // Helper: CPC calculation
+      const calcCpc = (cost: number | null, clicks: number | null) => {
+        if (cost === null || clicks === null || clicks === 0) return null;
+        return Number(cost) / Number(clicks);
+      };
+
+      const combinedData: any[] = [];
+      let keywordRowCount = 0;
+      let placementChangeCount = 0;
+
+      for (const [campaignId, campaignName] of sortedCampaigns) {
+        // --- 1. Placement rows (always 3 per campaign, on top) ---
+        const campaignPlacements = (placementRecs as any[]).filter((r: any) => r.campaign_id === campaignId);
+
+        // Map existing placements by their normalized category
+        const placementByCategory = new Map<string, any>();
+        for (const rec of campaignPlacements) {
+          const category = normalizePlacement(rec.targeting);
+          if (!placementByCategory.has(category) ||
+              (Number(rec.pre_clicks_lifetime) || 0) > (Number(placementByCategory.get(category).pre_clicks_lifetime) || 0)) {
+            placementByCategory.set(category, rec);
+          }
+        }
+
+        // Create exactly 3 placement rows per campaign
+        for (const placementName of STANDARD_PLACEMENTS) {
+          const existingRec = placementByCategory.get(placementName);
+
+          if (existingRec) {
+            const recommendedAdj = Math.max(0, Number(existingRec.recommended_value) || 0);
+            const currentAdj = Number(existingRec.old_value) || 0;
+            const change = recommendedAdj - currentAdj;
+            placementChangeCount++;
+
+            combinedData.push({
+              'Type': existingRec.recommendation_type === 'brand_placement_adjustment' ? 'Placement (Sponsored Brands)' : 'Placement (Sponsored Products)',
+              'Country': existingRec.country,
+              'Campaign Name': existingRec.campaign_name,
+              'Ad Group Name': '',
+              'Targeting': placementName,
+              'Match Type': '',
+              'Current Bid': '',
+              'Recommended Bid': '',
+              'Current Adjustment': `${currentAdj}%`,
+              'Recommended Adjustment': `${recommendedAdj}%`,
+              'Change %': `${change > 0 ? '+' : ''}${change}%`,
+              'Action': change > 0 ? 'increase' : change < 0 ? 'decrease' : 'no change',
+              'ACOS Target': `${Math.round((existingRec.acos_target || 0) * 100)}%`,
+              'Weighted ACOS': existingRec.weighted_acos ? `${Math.round(existingRec.weighted_acos * 100)}%` : 'N/A',
+              'Confidence': existingRec.confidence || '',
+              '30D Clicks': '',
+              '30D CPC': '',
+              '30D Spend': '',
+              '30D Orders': '',
+              '30D ACOS': '',
+              'T0 Clicks': '',
+              'T0 CPC': '',
+              'T0 Spend': '',
+              'T0 Orders': '',
+              'T0 ACOS': '',
+              '365D Clicks': '',
+              '365D CPC': '',
+              '365D Spend': '',
+              '365D Orders': '',
+              '365D ACOS': '',
+              'Lifetime Clicks': existingRec.pre_clicks_lifetime || 0,
+              'Lifetime CPC': '',
+              'Lifetime Spend': '',
+              'Lifetime Orders': '',
+              'Lifetime ACOS': '',
+              'Reason': existingRec.reason || ''
+            });
+          } else {
+            // No recommendation for this placement — show "no change" row
+            combinedData.push({
+              'Type': 'Placement',
+              'Country': countryStr,
+              'Campaign Name': campaignName,
+              'Ad Group Name': '',
+              'Targeting': placementName,
+              'Match Type': '',
+              'Current Bid': '',
+              'Recommended Bid': '',
+              'Current Adjustment': '',
+              'Recommended Adjustment': 'No change',
+              'Change %': '0%',
+              'Action': 'no change',
+              'ACOS Target': '',
+              'Weighted ACOS': '',
+              'Confidence': '',
+              '30D Clicks': '',
+              '30D CPC': '',
+              '30D Spend': '',
+              '30D Orders': '',
+              '30D ACOS': '',
+              'T0 Clicks': '',
+              'T0 CPC': '',
+              'T0 Spend': '',
+              'T0 Orders': '',
+              'T0 ACOS': '',
+              '365D Clicks': '',
+              '365D CPC': '',
+              '365D Spend': '',
+              '365D Orders': '',
+              '365D ACOS': '',
+              'Lifetime Clicks': '',
+              'Lifetime CPC': '',
+              'Lifetime Spend': '',
+              'Lifetime Orders': '',
+              'Lifetime ACOS': '',
+              'Reason': 'No change recommended'
+            });
+          }
+        }
+
+        // --- 2. Keyword rows (sorted by Ad Group A-Z, then 30D Spend high-low) ---
+        const campaignKeywords = (keywordRecs as any[])
+          .filter((r: any) => r.campaign_id === campaignId)
+          .sort((a: any, b: any) => {
+            const adGroupCompare = (a.ad_group_name || '').localeCompare(b.ad_group_name || '');
+            if (adGroupCompare !== 0) return adGroupCompare;
+            const aSpend = Number(a.pre_cost_30d) || Number(a.pre_cost_lifetime) || 0;
+            const bSpend = Number(b.pre_cost_30d) || Number(b.pre_cost_lifetime) || 0;
+            return bSpend - aSpend;
+          });
+
+        for (const rec of campaignKeywords) {
+          keywordRowCount++;
+          const oldVal = Number(rec.old_value) || 0;
+          const newVal = Number(rec.recommended_value) || 0;
+          const changePercent = oldVal > 0
+            ? Math.round(((newVal - oldVal) / oldVal) * 100)
+            : 0;
+
+          const acosTarget = Number(rec.acos_target) || 0;
+          const weightedAcos = Number(rec.weighted_acos) || 0;
+
+          const d30Clicks = Number(rec.pre_clicks_30d) || 0;
+          const d30Cost = Number(rec.pre_cost_30d) || 0;
+          const d30Orders = Number(rec.pre_orders_30d) || 0;
+          const d30Cpc = calcCpc(d30Cost, d30Clicks);
+
+          const t0Clicks = Number(rec.pre_clicks_t0) || 0;
+          const t0Cost = Number(rec.pre_cost_t0) || 0;
+          const t0Orders = Number(rec.pre_orders_t0) || 0;
+          const t0Cpc = calcCpc(t0Cost, t0Clicks);
+
+          const d365Clicks = Number(rec.pre_clicks_365d) || 0;
+          const d365Cost = Number(rec.pre_cost_365d) || 0;
+          const d365Orders = Number(rec.pre_orders_365d) || 0;
+          const d365Cpc = calcCpc(d365Cost, d365Clicks);
+
+          const lifetimeClicks = Number(rec.pre_clicks_lifetime) || 0;
+          const lifetimeCost = Number(rec.pre_cost_lifetime) || 0;
+          const lifetimeOrders = Number(rec.pre_orders_lifetime) || 0;
+          const lifetimeCpc = calcCpc(lifetimeCost, lifetimeClicks);
+
+          combinedData.push({
+            'Type': 'Keyword Bid',
+            'Country': rec.country,
+            'Campaign Name': rec.campaign_name,
+            'Ad Group Name': rec.ad_group_name || '',
+            'Targeting': rec.targeting,
+            'Match Type': rec.match_type,
+            'Current Bid': `€${oldVal.toFixed(2)}`,
+            'Recommended Bid': `€${newVal.toFixed(2)}`,
+            'Current Adjustment': '',
+            'Recommended Adjustment': '',
+            'Change %': `${changePercent}%`,
+            'Action': newVal > oldVal ? 'increase' : 'decrease',
+            'ACOS Target': `${Math.round(acosTarget * 100)}%`,
+            'Weighted ACOS': `${Math.round(weightedAcos * 100)}%`,
+            'Confidence': rec.confidence || '',
+            '30D Clicks': d30Clicks,
+            '30D CPC': d30Cpc !== null ? `€${d30Cpc.toFixed(2)}` : 'N/A',
+            '30D Spend': `€${d30Cost.toFixed(2)}`,
+            '30D Orders': d30Orders,
+            '30D ACOS': rec.pre_acos_30d != null ? `${Math.round(Number(rec.pre_acos_30d) * 100)}%` : 'N/A',
+            'T0 Clicks': t0Clicks,
+            'T0 CPC': t0Cpc !== null ? `€${t0Cpc.toFixed(2)}` : 'N/A',
+            'T0 Spend': `€${t0Cost.toFixed(2)}`,
+            'T0 Orders': t0Orders,
+            'T0 ACOS': rec.pre_acos_t0 != null ? `${Math.round(Number(rec.pre_acos_t0) * 100)}%` : 'N/A',
+            '365D Clicks': d365Clicks,
+            '365D CPC': d365Cpc !== null ? `€${d365Cpc.toFixed(2)}` : 'N/A',
+            '365D Spend': `€${d365Cost.toFixed(2)}`,
+            '365D Orders': d365Orders,
+            '365D ACOS': rec.pre_acos_365d != null ? `${Math.round(Number(rec.pre_acos_365d) * 100)}%` : 'N/A',
+            'Lifetime Clicks': lifetimeClicks,
+            'Lifetime CPC': lifetimeCpc !== null ? `€${lifetimeCpc.toFixed(2)}` : 'N/A',
+            'Lifetime Spend': `€${lifetimeCost.toFixed(2)}`,
+            'Lifetime Orders': lifetimeOrders,
+            'Lifetime ACOS': rec.pre_acos_lifetime != null ? `${Math.round(Number(rec.pre_acos_lifetime) * 100)}%` : 'N/A',
+            'Reason': rec.reason || ''
+          });
+        }
+      }
+
+      // Add combined Bid Adjustments sheet to workbook
+      if (combinedData.length > 0) {
+        const wsCombined = XLSX.utils.json_to_sheet(combinedData);
+        XLSX.utils.book_append_sheet(wb, wsCombined, 'Bid Adjustments');
       }
 
       // Add summary sheet with campaigns needing both adjustments
       const campaignsNeedingBoth = Array.from(campaignsWithPlacements)
         .filter(cId => campaignsWithKeywords.has(cId as string));
-      
+
       if (campaignsNeedingBoth.length > 0) {
         const bothData = campaignsNeedingBoth.map(cId => {
           const keywordCount = (keywordRecs as any[]).filter(r => r.campaign_id === cId).length;
           const placementCount = (placementRecs as any[]).filter(r => r.campaign_id === cId).length;
-          const campaignName = (keywordRecs as any[]).find(r => r.campaign_id === cId)?.campaign_name || 
-                              (placementRecs as any[]).find(r => r.campaign_id === cId)?.campaign_name || cId;
+          const cName = (keywordRecs as any[]).find(r => r.campaign_id === cId)?.campaign_name ||
+                        (placementRecs as any[]).find(r => r.campaign_id === cId)?.campaign_name || cId;
           return {
             'Campaign ID': cId,
-            'Campaign Name': campaignName,
+            'Campaign Name': cName,
             'Keyword Bid Changes': keywordCount,
             'Placement Adjustments': placementCount,
             'Total Changes Needed': keywordCount + placementCount,
@@ -3235,16 +3350,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         '30D Weight': `${d30WeightPct}%`,
         '365D Weight': `${d365WeightPct}%`,
         'Lifetime Weight': `${lifetimeWeightPct}%`,
-        'Total Keyword Changes': keywordData.length,
-        'Total Placement Changes': placementData.length,
+        'Total Keyword Changes': keywordRowCount,
+        'Total Placement Changes': placementChangeCount,
+        'Total Campaigns': sortedCampaigns.length,
         'Campaigns Needing Both': campaignsNeedingBoth.length,
-        'Note': 'Recommendations generated daily at 3:00 AM UTC. Items marked "NEEDS BOTH ADJUSTMENTS" require attention in both sheets.'
+        'Note': 'Combined sheet sorted by Campaign (A-Z). Per campaign: 3 placement rows first, then keyword bids sorted by Ad Group (A-Z) and Spend (high-low).'
       }];
       const wsMetadata = XLSX.utils.json_to_sheet(metadataData);
       XLSX.utils.book_append_sheet(wb, wsMetadata, 'Export Info');
 
       // If no recommendations found
-      if (keywordData.length === 0 && placementData.length === 0) {
+      if (combinedData.length === 0) {
         const emptyData = [{
           'Message': 'No recommendations found for the selected filters',
           'Country': countryStr,
@@ -3256,7 +3372,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-      const filename = campaignIdFilter 
+      const filename = campaignIdFilter
         ? `bid-recommendations-${countryStr}-campaign-${new Date().toISOString().split('T')[0]}.xlsx`
         : `bid-recommendations-${countryStr}-${new Date().toISOString().split('T')[0]}.xlsx`;
 
