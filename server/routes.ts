@@ -884,30 +884,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       try {
         if (campaignType === 'brands') {
-          // Query brand placement table with correct column names
+          // Query brand placement table
+          // First check which columns exist (brand table may not have all columns)
+          const brandCols = await sqlClient`
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 's_brand_placement'
+          `;
+          const brandColNames = new Set(brandCols.map((c: any) => c.column_name));
+
           const conditions = ['1=1'];
           const params: any[] = [];
           if (campaignId) { conditions.push(`campaign_id::text = $${params.length + 1}`); params.push(campaignId); }
           if (from) { conditions.push(`date >= $${params.length + 1}::date`); params.push(from); }
           if (to) { conditions.push(`date <= $${params.length + 1}::date`); params.push(to); }
 
+          const placementCol = brandColNames.has('placement_classification') ? "COALESCE(placement_classification, 'Brand')" : "'Brand'";
+          const biddingStrategyCol = brandColNames.has('campaign_bidding_strategy') ? 'campaign_bidding_strategy' : "NULL";
+          const bidAdjCol = brandColNames.has('bid_adjustment_pct') ? 'bid_adjustment_pct::text' : "NULL";
+          const salesCol = brandColNames.has('sales_14d') ? 'sales_14d' : (brandColNames.has('sales') ? 'sales' : '0');
+          const purchasesCol = brandColNames.has('purchases_14d') ? 'purchases_14d' : (brandColNames.has('purchases') ? 'purchases' : '0');
+
           allResults = await sqlClient.unsafe(`
             SELECT
-              COALESCE(placement_classification, 'Brand') as placement,
-              campaign_bidding_strategy as "biddingStrategy",
-              bid_adjustment_pct::text as "bidAdjustmentPct",
+              ${placementCol} as placement,
+              ${biddingStrategyCol} as "biddingStrategy",
+              ${bidAdjCol} as "bidAdjustmentPct",
               date::text as date,
               country,
               impressions::text as impressions,
               clicks::text as clicks,
               cost::text as cost,
-              sales_14d::text as sales,
-              purchases_14d::text as purchases
+              ${salesCol}::text as sales,
+              ${purchasesCol}::text as purchases
             FROM s_brand_placement
             WHERE ${conditions.join(' AND ')}
           `, params);
         } else {
           // Product placement table with correct snake_case column names
+          // Check which columns exist to handle bid_adjustment_pct safely
+          const prodCols = await sqlClient`
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 's_products_placement'
+          `;
+          const prodColNames = new Set(prodCols.map((c: any) => c.column_name));
+          const prodBidAdjCol = prodColNames.has('bid_adjustment_pct') ? 'bid_adjustment_pct::text' : 'NULL';
+
           const conditions = ['1=1'];
           const params: any[] = [];
           if (campaignId) { conditions.push(`campaign_id::text = $${params.length + 1}`); params.push(campaignId); }
@@ -918,7 +939,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             SELECT
               placement,
               campaign_bidding_strategy as "biddingStrategy",
-              bid_adjustment_pct::text as "bidAdjustmentPct",
+              ${prodBidAdjCol} as "bidAdjustmentPct",
               date::text as date,
               country,
               impressions::text as impressions,
