@@ -3073,6 +3073,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Fetch current bid_adjustment_pct for ALL placements in this country
+      // so "no change" rows can still display the current adjustment value
+      const allPlacementAdjMap = new Map<string, number>();
+      try {
+        const prodAdjQuery = campaignIdFilter
+          ? sql`SELECT DISTINCT ON (campaign_id, placement)
+                  campaign_id::text, placement,
+                  COALESCE(bid_adjustment_pct, 0)::numeric as bid_adj
+                FROM s_products_placement
+                WHERE country = ${countryStr} AND campaign_id = ${campaignIdFilter}
+                ORDER BY campaign_id, placement, date DESC`
+          : sql`SELECT DISTINCT ON (campaign_id, placement)
+                  campaign_id::text, placement,
+                  COALESCE(bid_adjustment_pct, 0)::numeric as bid_adj
+                FROM s_products_placement
+                WHERE country = ${countryStr}
+                ORDER BY campaign_id, placement, date DESC`;
+        const prodAdjRows = await db.execute(prodAdjQuery) as any[];
+        for (const row of prodAdjRows) {
+          allPlacementAdjMap.set(`${row.campaign_id}|${row.placement}`, Number(row.bid_adj));
+        }
+
+        const brandAdjQuery = campaignIdFilter
+          ? sql`SELECT DISTINCT ON (campaign_id, placement_classification)
+                  campaign_id::text, placement_classification as placement,
+                  COALESCE(bid_adjustment_pct, 0)::numeric as bid_adj
+                FROM s_brand_placement
+                WHERE country = ${countryStr} AND campaign_id = ${campaignIdFilter}
+                ORDER BY campaign_id, placement_classification, date DESC`
+          : sql`SELECT DISTINCT ON (campaign_id, placement_classification)
+                  campaign_id::text, placement_classification as placement,
+                  COALESCE(bid_adjustment_pct, 0)::numeric as bid_adj
+                FROM s_brand_placement
+                WHERE country = ${countryStr}
+                ORDER BY campaign_id, placement_classification, date DESC`;
+        const brandAdjRows = await db.execute(brandAdjQuery) as any[];
+        for (const row of brandAdjRows) {
+          allPlacementAdjMap.set(`${row.campaign_id}|${row.placement}`, Number(row.bid_adj));
+        }
+      } catch (e) {
+        console.warn('Could not fetch placement adjustments for no-change rows:', e);
+      }
+
       // Build set of campaigns with placement recommendations
       const campaignsWithPlacements = new Set(
         (placementRecs as any[]).map((r: any) => r.campaign_id)
@@ -3112,6 +3155,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (lower.includes('top') && lower.includes('search')) return 'Top of Search (first page)';
         if (lower.includes('detail') || lower.includes('product')) return 'Product Page';
         return 'Rest of Search';
+      };
+
+      // Lookup current placement adjustment from allPlacementAdjMap
+      // s_products_placement stores: "Top of search (first page)", "Product pages", "Rest of search"
+      // s_brand_placement stores: "Top of search", "Detail page", "Rest of search"
+      // Excel uses: "Top of Search (first page)", "Product Page", "Rest of Search"
+      const DB_PLACEMENT_NAMES: Record<string, string[]> = {
+        'Top of Search (first page)': ['Top of search (first page)', 'Top of search', 'Top of Search (first page)'],
+        'Product Page': ['Product pages', 'Detail page', 'Product page', 'Product Page'],
+        'Rest of Search': ['Rest of search', 'Rest of Search', 'Other'],
+      };
+      const lookupPlacementAdj = (campaignId: string, placementName: string): number | null => {
+        const variants = DB_PLACEMENT_NAMES[placementName] || [placementName];
+        for (const variant of variants) {
+          const val = allPlacementAdjMap.get(`${campaignId}|${variant}`);
+          if (val !== undefined) return val;
+        }
+        return null;
       };
 
       // Helper: CPC calculation
@@ -3188,6 +3249,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
           } else {
             // No recommendation for this placement — show "no change" row
+            const currentAdj = lookupPlacementAdj(campaignId, placementName);
             combinedData.push({
               'Type': 'Placement',
               'Country': countryStr,
@@ -3197,7 +3259,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               'Match Type': '',
               'Current Bid': '',
               'Recommended Bid': '',
-              'Current Adjustment': '',
+              'Current Adjustment': currentAdj !== null ? `${currentAdj}%` : '',
               'Recommended Adjustment': 'No change',
               'Change %': '0%',
               'Action': 'no change',
@@ -3229,14 +3291,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        // --- 2. Keyword rows (sorted by Ad Group A-Z, then 30D Spend high-low) ---
+        // --- 2. Keyword rows (sorted by Ad Group A-Z, then T0 Spend high-low) ---
         const campaignKeywords = (keywordRecs as any[])
           .filter((r: any) => r.campaign_id === campaignId)
           .sort((a: any, b: any) => {
             const adGroupCompare = (a.ad_group_name || '').localeCompare(b.ad_group_name || '');
             if (adGroupCompare !== 0) return adGroupCompare;
-            const aSpend = Number(a.pre_cost_30d) || Number(a.pre_cost_lifetime) || 0;
-            const bSpend = Number(b.pre_cost_30d) || Number(b.pre_cost_lifetime) || 0;
+            const aSpend = Number(a.pre_cost_t0) || 0;
+            const bSpend = Number(b.pre_cost_t0) || 0;
             return bSpend - aSpend;
           });
 

@@ -26,5 +26,5 @@ try {
   throw new Error('DATABASE_URL is malformed. Please check for extra characters or whitespace.');
 }
 
-const client = postgres(connectionUrl);
+const client = postgres(connectionUrl, { prepare: false, ssl: 'require' });
 export const db = drizzle(client, { schema });
