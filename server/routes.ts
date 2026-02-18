@@ -2260,6 +2260,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Campaign-level T0 endpoint - returns campaign T0 date and aggregated metrics since T0
+  // T0 = most recent date of ANY bid change (keyword or placement) in the campaign
+  app.get("/api/campaign-t0", async (req, res) => {
+    try {
+      const { campaignId, country, campaignType } = req.query;
+
+      if (!campaignId || !country) {
+        return res.status(400).json({ error: 'campaignId and country parameters are required' });
+      }
+
+      const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+      const sqlClient = postgres(connectionUrl);
+
+      // Get campaign T0 date: GREATEST of MAX keyword bid change and MAX placement adjustment change
+      // Note: bid_change_history uses snapshot_date (date column), history_bid_adjustments uses date_detected
+      const t0Result = await sqlClient`
+        SELECT GREATEST(
+          (SELECT MAX(snapshot_date) FROM bid_change_history
+           WHERE campaign_id = ${campaignId as string}::bigint AND country = ${country as string}),
+          (SELECT MAX(date_detected) FROM history_bid_adjustments
+           WHERE campaign_id = ${campaignId as string} AND country = ${country as string})
+        ) as campaign_t0_date,
+        (SELECT COUNT(*) FROM bid_change_history
+         WHERE campaign_id = ${campaignId as string}::bigint AND country = ${country as string})::int
+        +
+        (SELECT COUNT(*) FROM history_bid_adjustments
+         WHERE campaign_id = ${campaignId as string} AND country = ${country as string})::int
+        as total_changes
+      `;
+
+      const campaignT0Date = t0Result[0]?.campaign_t0_date || null;
+      const totalBidChanges = Number(t0Result[0]?.total_changes) || 0;
+
+      // Calculate days since T0
+      let daysSinceT0 = 999;
+      if (campaignT0Date) {
+        const t0 = new Date(campaignT0Date);
+        const now = new Date();
+        daysSinceT0 = Math.floor((now.getTime() - t0.getTime()) / (1000 * 60 * 60 * 24));
+      }
+
+      // Determine which search terms table to use
+      const cType = (campaignType as string) || 'SP';
+      const isProducts = cType === 'SP' || cType === 'products';
+
+      // Aggregate metrics since campaign T0 date
+      let metricsResult;
+      if (isProducts) {
+        metricsResult = await sqlClient`
+          SELECT
+            SUM(COALESCE(clicks, 0)) as t0_clicks,
+            SUM(COALESCE(cost, 0)) as t0_cost,
+            SUM(COALESCE(CAST("sales30d" AS NUMERIC), 0)) as t0_sales,
+            SUM(COALESCE(CAST("purchases30d" AS NUMERIC), 0)) as t0_orders
+          FROM "s_products_search_terms"
+          WHERE "campaignId" = ${campaignId as string}
+            AND country = ${country as string}
+            ${campaignT0Date ? sqlClient`AND date::date >= ${campaignT0Date}::date` : sqlClient``}
+        `;
+      } else {
+        metricsResult = await sqlClient`
+          SELECT
+            SUM(COALESCE(clicks, 0)) as t0_clicks,
+            SUM(COALESCE(cost, 0)) as t0_cost,
+            SUM(COALESCE(sales, 0)) as t0_sales,
+            SUM(COALESCE(purchases, 0)) as t0_orders
+          FROM "s_brand_search_terms"
+          WHERE campaign_id = ${campaignId as string}
+            AND country = ${country as string}
+            ${campaignT0Date ? sqlClient`AND date::date >= ${campaignT0Date}::date` : sqlClient``}
+        `;
+      }
+
+      const metrics = metricsResult[0] || {};
+      const t0Clicks = Number(metrics.t0_clicks) || 0;
+      const t0Cost = Number(metrics.t0_cost) || 0;
+      const t0Sales = Number(metrics.t0_sales) || 0;
+      const t0Orders = Number(metrics.t0_orders) || 0;
+
+      const t0Acos = t0Sales > 0 ? Math.round((t0Cost / t0Sales) * 1000) / 10 : null;
+      const t0Cpc = t0Clicks > 0 ? Math.round((t0Cost / t0Clicks) * 100) / 100 : null;
+      const t0Roas = t0Cost > 0 ? Math.round((t0Sales / t0Cost) * 100) / 100 : null;
+
+      await sqlClient.end();
+
+      res.json({
+        campaignId,
+        campaignT0Date,
+        daysSinceT0,
+        totalBidChanges,
+        t0_clicks: t0Clicks,
+        t0_cost: t0Cost,
+        t0_sales: t0Sales,
+        t0_orders: t0Orders,
+        t0_acos: t0Acos,
+        t0_cpc: t0Cpc,
+        t0_roas: t0Roas,
+      });
+    } catch (error: any) {
+      console.error('Campaign T0 error:', error);
+      res.status(500).json({ error: error.message || 'Failed to fetch campaign T0' });
+    }
+  });
+
   // Migration endpoint - creates ACOS_Target_Campaign table
   app.post("/api/migrations/acos-targets", async (req, res) => {
     try {
@@ -2415,7 +2519,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // T0 = data since last bid change (or lifetime if no change)
       const keywordData = await sqlClient`
         WITH last_changes AS (
-          SELECT 
+          SELECT
             targeting,
             campaign_id,
             ad_group_id,
@@ -2425,8 +2529,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}` : sqlClient``}
           GROUP BY targeting, campaign_id, ad_group_id
         ),
+        campaign_last_changes AS (
+          SELECT campaign_id, MAX(change_date) as campaign_last_change_date
+          FROM (
+            SELECT campaign_id::text as campaign_id, snapshot_date as change_date
+            FROM "bid_change_history"
+            WHERE country = ${country as string}
+            ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}::bigint` : sqlClient``}
+            UNION ALL
+            SELECT campaign_id, date_detected as change_date
+            FROM "history_bid_adjustments"
+            WHERE country = ${country as string}
+            ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}` : sqlClient``}
+          ) combined
+          GROUP BY campaign_id
+        ),
         keyword_base AS (
-          SELECT 
+          SELECT
             s."campaignId" as campaign_id,
             s."campaignName" as campaign_name,
             s."adGroupId" as ad_group_id,
@@ -2439,16 +2558,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
             COALESCE(s.cost, 0) as cost,
             COALESCE(CAST(s."sales30d" AS NUMERIC), 0) as sales,
             COALESCE(CAST(s."purchases30d" AS NUMERIC), 0) as orders,
-            lc.last_change_date::text as last_change_date
+            lc.last_change_date::text as last_change_date,
+            clc.campaign_last_change_date::text as campaign_last_change_date
           FROM "s_products_search_terms" s
-          LEFT JOIN last_changes lc 
-            ON s."campaignId"::text = lc.campaign_id::text 
-            AND s.keyword = lc.targeting 
+          LEFT JOIN last_changes lc
+            ON s."campaignId"::text = lc.campaign_id::text
+            AND s.keyword = lc.targeting
             AND s."adGroupId"::text = lc.ad_group_id::text
+          LEFT JOIN campaign_last_changes clc
+            ON s."campaignId"::text = clc.campaign_id
           WHERE s.country = ${country as string}
           ${campaignId ? sqlClient`AND s."campaignId" = ${campaignId as string}` : sqlClient``}
         )
-        SELECT 
+        SELECT
           campaign_id,
           campaign_name,
           ad_group_id,
@@ -2457,28 +2579,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
           match_type,
           MAX(keyword_bid) as current_bid,
           MAX(last_change_date) as last_change_date,
-          
+          MAX(campaign_last_change_date) as campaign_last_change_date,
+
           -- Lifetime metrics
           SUM(clicks) as lifetime_clicks,
           SUM(cost) as lifetime_cost,
           SUM(sales) as lifetime_sales,
           SUM(orders) as lifetime_orders,
-          
+
           -- 365D metrics
           SUM(CASE WHEN date >= ${d365AgoStr} THEN clicks ELSE 0 END) as d365_clicks,
           SUM(CASE WHEN date >= ${d365AgoStr} THEN cost ELSE 0 END) as d365_cost,
           SUM(CASE WHEN date >= ${d365AgoStr} THEN sales ELSE 0 END) as d365_sales,
-          
+
           -- 30D metrics
           SUM(CASE WHEN date >= ${d30AgoStr} THEN clicks ELSE 0 END) as d30_clicks,
           SUM(CASE WHEN date >= ${d30AgoStr} THEN cost ELSE 0 END) as d30_cost,
           SUM(CASE WHEN date >= ${d30AgoStr} THEN sales ELSE 0 END) as d30_sales,
-          
-          -- T0 metrics (since last change, or all data if no change)
+
+          -- T0 metrics (since last keyword bid change, or all data if no change)
           SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN clicks ELSE 0 END) as t0_clicks,
           SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN cost ELSE 0 END) as t0_cost,
           SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN sales ELSE 0 END) as t0_sales,
-          
+
+          -- Campaign T0 metrics (since last change of ANY kind in campaign)
+          SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN clicks ELSE 0 END) as campaign_t0_clicks,
+          SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN cost ELSE 0 END) as campaign_t0_cost,
+          SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN sales ELSE 0 END) as campaign_t0_sales,
+
           MIN(date) as first_date,
           MAX(date) as last_date
         FROM keyword_base
@@ -2503,6 +2631,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const t0Cost = Number(kw.t0_cost);
         const t0Sales = Number(kw.t0_sales);
         const lastChangeDate = kw.last_change_date;
+
+        // Campaign T0 metrics (since last change of ANY kind in campaign)
+        const campaignT0Clicks = Number(kw.campaign_t0_clicks);
+        const campaignT0Cost = Number(kw.campaign_t0_cost);
+        const campaignT0Sales = Number(kw.campaign_t0_sales);
+        const campaignLastChangeDate = kw.campaign_last_change_date;
+        const campaignT0Acos = campaignT0Sales > 0 ? campaignT0Cost / campaignT0Sales : null;
 
         // Calculate ACOS for each period
         const t0Acos = t0Sales > 0 ? t0Cost / t0Sales : (t0Clicks >= 30 ? 999 : null);
@@ -2595,6 +2730,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           confidence: confidence,
           days_since_change: daysSinceChange,
           last_change_date: lastChangeDate || null,
+          campaign_t0_date: campaignLastChangeDate || null,
+          campaign_t0_acos: campaignT0Acos,
+          campaign_t0_clicks: campaignT0Clicks,
+          campaign_t0_cost: campaignT0Cost,
+          campaign_t0_sales: campaignT0Sales,
           reason: `Weighted ACOS (${Math.round(weightedAcos * 100)}%) is ${action === 'decrease' ? 'above' : 'below'} target (${Math.round(targetAcos * 100)}%)`
         });
       }

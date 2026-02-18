@@ -9,7 +9,8 @@ import ACOSBadge from "@/components/ACOSBadge";
 import CurrencyBadge from "@/components/CurrencyBadge";
 import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
-import { Download, TrendingUp, Target, Info } from "lucide-react";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { Download, TrendingUp, Target, Info, Clock } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Link } from "wouter";
 import { useLocation, useRoute } from "wouter";
@@ -124,6 +125,20 @@ export default function CampaignView() {
       return response.json();
     },
     refetchInterval: 3600000, // Auto-refresh every hour
+  });
+
+  // Campaign-level T0 data (since last bid/placement change in campaign)
+  const { data: campaignT0, isLoading: t0Loading } = useQuery({
+    queryKey: ['/api/campaign-t0', campaignId, countryCode, campaignType],
+    queryFn: async () => {
+      const params = new URLSearchParams({ campaignId });
+      if (countryCode) params.append('country', countryCode);
+      if (campaignType) params.append('campaignType', campaignType === 'brands' ? 'SB' : 'SP');
+      const response = await fetch(`/api/campaign-t0?${params}`);
+      return response.json();
+    },
+    enabled: !!countryCode && campaignType !== 'display',
+    refetchInterval: 3600000,
   });
 
   const handleExportNegatives = async () => {
@@ -241,6 +256,74 @@ export default function CampaignView() {
             ))
           )}
         </div>
+
+        {/* Campaign T0 Section - shows performance since last bid/placement change */}
+        {campaignType !== 'display' && (
+          t0Loading ? (
+            <Skeleton className="h-28" />
+          ) : campaignT0 && !campaignT0.error ? (
+            <Card className="border-dashed">
+              <CardHeader className="pb-3 pt-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-sm">Campaign T0</span>
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Performance since the last keyword bid or placement adjustment change in this campaign
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {campaignT0.campaignT0Date ? (
+                      <>
+                        <Badge variant="outline" className="font-mono text-xs">
+                          T0: {campaignT0.campaignT0Date}
+                        </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {campaignT0.daysSinceT0} days ago
+                        </Badge>
+                      </>
+                    ) : (
+                      <Badge variant="outline" className="text-xs">No bid changes</Badge>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pb-4">
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className="text-xl font-bold">
+                      {campaignT0.t0_acos != null ? `${campaignT0.t0_acos.toFixed(1)}%` : '--'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">T0 ACOS</div>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className="text-xl font-bold">
+                      {(kpis?.currency === 'EUR' ? '\u20AC' : kpis?.currency || '\u20AC')}{campaignT0.t0_sales?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">T0 Sales</div>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className="text-xl font-bold">
+                      {(kpis?.currency === 'EUR' ? '\u20AC' : kpis?.currency || '\u20AC')}{campaignT0.t0_cost?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">T0 Cost</div>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className="text-xl font-bold">
+                      {campaignT0.t0_roas != null ? campaignT0.t0_roas.toFixed(2) : '--'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">T0 ROAS</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null
+        )}
 
         {chartLoading ? (
           <Skeleton className="h-80" />

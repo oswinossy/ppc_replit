@@ -32,8 +32,13 @@ export async function createBidChangeHistoryTable(): Promise<void> {
     `);
 
     await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS bid_history_campaign_type_idx 
+      CREATE INDEX IF NOT EXISTS bid_history_campaign_type_idx
       ON bid_change_history(campaign_type)
+    `);
+
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS bid_history_campaign_country_idx
+      ON bid_change_history(campaign_id, country)
     `);
 
     console.log('✓ bid_change_history table created/verified');
