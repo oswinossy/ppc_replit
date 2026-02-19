@@ -70,15 +70,10 @@ async function generateKeywordRecommendationsForCountry(country: string, connect
     const d365AgoStr = d365Ago.toISOString().split('T')[0];
 
     const keywordData = await sqlClient`
-      WITH last_changes AS (
-        SELECT
-          targeting,
-          campaign_id,
-          ad_group_id,
-          MAX(date_adjusted) as last_change_date
-        FROM "bid_change_history"
+      WITH campaign_t0 AS (
+        SELECT campaign_id, last_change_date
+        FROM s_campaign_t0
         WHERE country = ${country}
-        GROUP BY targeting, campaign_id, ad_group_id
       ),
       keyword_base AS (
         SELECT
@@ -94,12 +89,10 @@ async function generateKeywordRecommendationsForCountry(country: string, connect
           COALESCE(s.cost, 0) as cost,
           COALESCE(CAST(s."sales30d" AS NUMERIC), 0) as sales,
           COALESCE(CAST(s."purchases30d" AS NUMERIC), 0) as orders,
-          lc.last_change_date::text as last_change_date
+          ct.last_change_date::text as last_change_date
         FROM "s_products_search_terms" s
-        LEFT JOIN last_changes lc
-          ON s."campaignId"::text = lc.campaign_id::text
-          AND s.keyword = lc.targeting
-          AND s."adGroupId"::text = lc.ad_group_id::text
+        LEFT JOIN campaign_t0 ct
+          ON s."campaignId"::text = ct.campaign_id
         WHERE s.country = ${country}
       )
       SELECT
@@ -256,6 +249,7 @@ interface PlacementPerformanceRow {
   sales: number;
   orders: number;
   currentAdjustment: number;
+  lastChangeDate?: string;
 }
 
 // Shared placement recommendation processing logic used by both product and brand placements
@@ -280,8 +274,15 @@ async function processPlacementRecommendations(
     action: string;
   }
   const campaignRecommendations = new Map<string, PlacementRec[]>();
+  const today = new Date();
 
   for (const p of placementData) {
+    // 14-day cooling period: skip campaigns changed less than 14 days ago
+    const daysSinceChange = p.lastChangeDate
+      ? Math.floor((today.getTime() - new Date(p.lastChangeDate).getTime()) / (1000 * 60 * 60 * 24))
+      : 999;
+    if (daysSinceChange < 14) continue;
+
     const campaignTarget = acosTargetsMap.get(p.campaign_id);
     if (!campaignTarget) continue;
 
@@ -407,23 +408,35 @@ async function generateProductPlacementRecommendationsForCountry(country: string
       return 0;
     }
 
-    // Query placement performance data
+    // Query placement performance data (T0 filtered: only data from last campaign change onwards)
     const placementData = await sqlClient`
+      WITH campaign_t0 AS (
+        SELECT campaign_id, last_change_date
+        FROM s_campaign_t0
+        WHERE country = ${country}
+      )
       SELECT
-        "campaignId" as campaign_id,
-        "campaignName" as campaign_name,
-        "placementClassification" as placement,
-        SUM(COALESCE(NULLIF(impressions, '')::numeric, 0)) as impressions,
-        SUM(COALESCE(NULLIF(clicks, '')::numeric, 0)) as clicks,
-        SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) as cost,
-        SUM(COALESCE(NULLIF("sales30d", '')::numeric, 0)) as sales,
-        SUM(COALESCE(NULLIF("purchases30d", '')::numeric, 0)) as orders
-      FROM "s_products_placement"
-      WHERE country = ${country}
-        AND "placementClassification" IS NOT NULL
-      GROUP BY "campaignId", "campaignName", "placementClassification"
-      HAVING SUM(COALESCE(NULLIF(clicks, '')::numeric, 0)) >= ${MIN_CLICKS}
-      ORDER BY SUM(COALESCE(NULLIF(cost, '')::numeric, 0)) DESC
+        p."campaignId" as campaign_id,
+        p."campaignName" as campaign_name,
+        p."placementClassification" as placement,
+        MAX(ct.last_change_date::text) as last_change_date,
+        SUM(CASE WHEN ct.last_change_date IS NULL OR p.date >= ct.last_change_date
+             THEN COALESCE(NULLIF(p.clicks, '')::numeric, 0) ELSE 0 END) as clicks,
+        SUM(CASE WHEN ct.last_change_date IS NULL OR p.date >= ct.last_change_date
+             THEN COALESCE(NULLIF(p.cost, '')::numeric, 0) ELSE 0 END) as cost,
+        SUM(CASE WHEN ct.last_change_date IS NULL OR p.date >= ct.last_change_date
+             THEN COALESCE(NULLIF(p."sales30d", '')::numeric, 0) ELSE 0 END) as sales,
+        SUM(CASE WHEN ct.last_change_date IS NULL OR p.date >= ct.last_change_date
+             THEN COALESCE(NULLIF(p."purchases30d", '')::numeric, 0) ELSE 0 END) as orders
+      FROM "s_products_placement" p
+      LEFT JOIN campaign_t0 ct ON p."campaignId"::text = ct.campaign_id
+      WHERE p.country = ${country}
+        AND p."placementClassification" IS NOT NULL
+      GROUP BY p."campaignId", p."campaignName", p."placementClassification"
+      HAVING SUM(CASE WHEN ct.last_change_date IS NULL OR p.date >= ct.last_change_date
+                  THEN COALESCE(NULLIF(p.clicks, '')::numeric, 0) ELSE 0 END) >= ${MIN_CLICKS}
+      ORDER BY SUM(CASE WHEN ct.last_change_date IS NULL OR p.date >= ct.last_change_date
+                    THEN COALESCE(NULLIF(p.cost, '')::numeric, 0) ELSE 0 END) DESC
     `;
 
     // Get latest bid_adjustment_pct per campaign+placement from the placement table itself
@@ -459,7 +472,8 @@ async function generateProductPlacementRecommendationsForCountry(country: string
       cost: Number(p.cost),
       sales: Number(p.sales),
       orders: Number(p.orders),
-      currentAdjustment: bidAdjMap.get(`${p.campaign_id}|${p.placement}`) ?? 0
+      currentAdjustment: bidAdjMap.get(`${p.campaign_id}|${p.placement}`) ?? 0,
+      lastChangeDate: p.last_change_date || undefined
     }));
 
     const savedCount = await processPlacementRecommendations(rows, acosTargetsMap, country, 'placement_adjustment', MIN_CLICKS, ACOS_WINDOW);
@@ -517,23 +531,29 @@ async function generateBrandPlacementRecommendationsForCountry(country: string, 
       ? `${campaignIdCol}, ${campaignNameCol}, placement_classification`
       : `${campaignIdCol}, ${campaignNameCol}`;
 
-    // Query aggregated brand placement performance
+    // Query aggregated brand placement performance (T0 filtered)
     const placementData = await sqlClient.unsafe(`
+      WITH campaign_t0 AS (
+        SELECT campaign_id, last_change_date
+        FROM s_campaign_t0
+        WHERE country = $1
+      )
       SELECT
-        ${campaignIdCol}::text as campaign_id,
-        ${campaignNameCol} as campaign_name,
-        ${placementCol} as placement,
-        COALESCE(SUM(impressions), 0) as impressions,
-        COALESCE(SUM(clicks), 0) as clicks,
-        COALESCE(SUM(cost::numeric), 0) as cost,
-        COALESCE(SUM(${salesCol}::numeric), 0) as sales,
-        COALESCE(SUM(${purchasesCol}::numeric), 0) as orders
-      FROM s_brand_placement
-      WHERE country = $1
-        ${hasPlacementClassification ? "AND placement_classification IS NOT NULL" : ""}
-      GROUP BY ${groupByCols}
-      HAVING COALESCE(SUM(clicks), 0) >= $2
-      ORDER BY COALESCE(SUM(cost::numeric), 0) DESC
+        sb.${campaignIdCol}::text as campaign_id,
+        sb.${campaignNameCol} as campaign_name,
+        ${hasPlacementClassification ? "COALESCE(sb.placement_classification, 'Brand')" : "'Brand'"} as placement,
+        MAX(ct.last_change_date::text) as last_change_date,
+        COALESCE(SUM(CASE WHEN ct.last_change_date IS NULL OR sb.date >= ct.last_change_date THEN sb.clicks ELSE 0 END), 0) as clicks,
+        COALESCE(SUM(CASE WHEN ct.last_change_date IS NULL OR sb.date >= ct.last_change_date THEN sb.cost::numeric ELSE 0 END), 0) as cost,
+        COALESCE(SUM(CASE WHEN ct.last_change_date IS NULL OR sb.date >= ct.last_change_date THEN sb.${salesCol}::numeric ELSE 0 END), 0) as sales,
+        COALESCE(SUM(CASE WHEN ct.last_change_date IS NULL OR sb.date >= ct.last_change_date THEN sb.${purchasesCol}::numeric ELSE 0 END), 0) as orders
+      FROM s_brand_placement sb
+      LEFT JOIN campaign_t0 ct ON sb.${campaignIdCol}::text = ct.campaign_id
+      WHERE sb.country = $1
+        ${hasPlacementClassification ? "AND sb.placement_classification IS NOT NULL" : ""}
+      GROUP BY sb.${campaignIdCol}, sb.${campaignNameCol}${hasPlacementClassification ? ", sb.placement_classification" : ""}
+      HAVING COALESCE(SUM(CASE WHEN ct.last_change_date IS NULL OR sb.date >= ct.last_change_date THEN sb.clicks ELSE 0 END), 0) >= $2
+      ORDER BY COALESCE(SUM(CASE WHEN ct.last_change_date IS NULL OR sb.date >= ct.last_change_date THEN sb.cost::numeric ELSE 0 END), 0) DESC
     `, [country, MIN_CLICKS]);
 
     // Get latest bid_adjustment_pct per campaign+placement
@@ -572,7 +592,8 @@ async function generateBrandPlacementRecommendationsForCountry(country: string, 
       cost: Number(p.cost),
       sales: Number(p.sales),
       orders: Number(p.orders),
-      currentAdjustment: bidAdjMap.get(`${p.campaign_id}|${p.placement}`) ?? 0
+      currentAdjustment: bidAdjMap.get(`${p.campaign_id}|${p.placement}`) ?? 0,
+      lastChangeDate: p.last_change_date || undefined
     }));
 
     const savedCount = await processPlacementRecommendations(rows, acosTargetsMap, country, 'brand_placement_adjustment', MIN_CLICKS, ACOS_WINDOW);
