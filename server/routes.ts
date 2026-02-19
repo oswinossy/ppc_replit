@@ -2261,7 +2261,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Campaign-level T0 endpoint - returns campaign T0 date and aggregated metrics since T0
-  // T0 = most recent date of ANY bid change (keyword or placement) in the campaign
+  // T0 = last_change_date from s_campaign_t0 (precomputed, resets per campaign on bid change)
   app.get("/api/campaign-t0", async (req, res) => {
     try {
       const { campaignId, country, campaignType } = req.query;
@@ -2273,25 +2273,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
       const sqlClient = postgres(connectionUrl);
 
-      // Get campaign T0 date: GREATEST of MAX keyword bid change and MAX placement adjustment change
-      // Note: bid_change_history uses snapshot_date (date column), history_bid_adjustments uses date_detected
+      // Get campaign T0 date from s_campaign_t0 lookup table
       const t0Result = await sqlClient`
-        SELECT GREATEST(
-          (SELECT MAX(snapshot_date) FROM bid_change_history
-           WHERE campaign_id = ${campaignId as string}::bigint AND country = ${country as string}),
-          (SELECT MAX(date_detected) FROM history_bid_adjustments
-           WHERE campaign_id = ${campaignId as string} AND country = ${country as string})
-        ) as campaign_t0_date,
-        (SELECT COUNT(*) FROM bid_change_history
-         WHERE campaign_id = ${campaignId as string}::bigint AND country = ${country as string})::int
-        +
-        (SELECT COUNT(*) FROM history_bid_adjustments
-         WHERE campaign_id = ${campaignId as string} AND country = ${country as string})::int
-        as total_changes
+        SELECT last_change_date as campaign_t0_date
+        FROM s_campaign_t0
+        WHERE campaign_id = ${campaignId as string} AND country = ${country as string}
       `;
 
       const campaignT0Date = t0Result[0]?.campaign_t0_date || null;
-      const totalBidChanges = Number(t0Result[0]?.total_changes) || 0;
+      const totalBidChanges = 0;
 
       // Calculate days since T0
       let daysSinceT0 = 999;
