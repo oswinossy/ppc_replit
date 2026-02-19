@@ -259,7 +259,8 @@ async function processPlacementRecommendations(
   country: string,
   recommendationType: string,
   minClicks: number,
-  acosWindow: number
+  acosWindow: number,
+  coolingPeriodDays: number = 14
 ): Promise<number> {
   interface PlacementRec {
     campaign_id: string;
@@ -277,11 +278,11 @@ async function processPlacementRecommendations(
   const today = new Date();
 
   for (const p of placementData) {
-    // 14-day cooling period: skip campaigns changed less than 14 days ago
+    // Cooling period: skip campaigns changed less than coolingPeriodDays ago (SP=7d, SB=14d)
     const daysSinceChange = p.lastChangeDate
       ? Math.floor((today.getTime() - new Date(p.lastChangeDate).getTime()) / (1000 * 60 * 60 * 24))
       : 999;
-    if (daysSinceChange < 14) continue;
+    if (daysSinceChange < coolingPeriodDays) continue;
 
     const campaignTarget = acosTargetsMap.get(p.campaign_id);
     if (!campaignTarget) continue;
@@ -425,9 +426,9 @@ async function generateProductPlacementRecommendationsForCountry(country: string
         SUM(CASE WHEN ct.last_change_date IS NULL OR p.date >= ct.last_change_date
              THEN COALESCE(NULLIF(p.cost, '')::numeric, 0) ELSE 0 END) as cost,
         SUM(CASE WHEN ct.last_change_date IS NULL OR p.date >= ct.last_change_date
-             THEN COALESCE(NULLIF(p."sales30d", '')::numeric, 0) ELSE 0 END) as sales,
+             THEN COALESCE(p.sales_7d, 0) ELSE 0 END) as sales,
         SUM(CASE WHEN ct.last_change_date IS NULL OR p.date >= ct.last_change_date
-             THEN COALESCE(NULLIF(p."purchases30d", '')::numeric, 0) ELSE 0 END) as orders
+             THEN COALESCE(p.purchases_7d, 0) ELSE 0 END) as orders
       FROM "s_products_placement" p
       LEFT JOIN campaign_t0 ct ON p."campaignId"::text = ct.campaign_id
       WHERE p.country = ${country}
@@ -476,7 +477,7 @@ async function generateProductPlacementRecommendationsForCountry(country: string
       lastChangeDate: p.last_change_date || undefined
     }));
 
-    const savedCount = await processPlacementRecommendations(rows, acosTargetsMap, country, 'placement_adjustment', MIN_CLICKS, ACOS_WINDOW);
+    const savedCount = await processPlacementRecommendations(rows, acosTargetsMap, country, 'placement_adjustment', MIN_CLICKS, ACOS_WINDOW, 7);
     console.log(`[Product Placements] ${country}: ${savedCount} recommendations saved`);
     return savedCount;
   } finally {
@@ -596,7 +597,7 @@ async function generateBrandPlacementRecommendationsForCountry(country: string, 
       lastChangeDate: p.last_change_date || undefined
     }));
 
-    const savedCount = await processPlacementRecommendations(rows, acosTargetsMap, country, 'brand_placement_adjustment', MIN_CLICKS, ACOS_WINDOW);
+    const savedCount = await processPlacementRecommendations(rows, acosTargetsMap, country, 'brand_placement_adjustment', MIN_CLICKS, ACOS_WINDOW, 14);
     console.log(`[Brand Placements] ${country}: ${savedCount} recommendations saved`);
     return savedCount;
   } finally {
