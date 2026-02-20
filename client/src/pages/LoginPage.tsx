@@ -37,6 +37,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
+          <img src="/logo.png" alt="PPC Portal" className="mx-auto h-16 mb-4" />
           <CardTitle className="text-2xl font-bold">PPC Portal</CardTitle>
           <CardDescription>Sign in to your account</CardDescription>
         </CardHeader>
