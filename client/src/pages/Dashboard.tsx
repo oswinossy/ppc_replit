@@ -16,6 +16,7 @@ import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { authFetch } from "@/lib/queryClient";
 import { format, subDays, differenceInDays, parseISO } from "date-fns";
 
 export default function Dashboard() {
@@ -44,7 +45,7 @@ export default function Dashboard() {
       if (selectedCountry !== 'all') {
         params.set('country', selectedCountry);
       }
-      const response = await fetch(`/api/dashboard?${params}`);
+      const response = await authFetch(`/api/dashboard?${params}`);
       const data = await response.json();
       if (data.error) throw new Error(data.error);
       return data;
@@ -61,7 +62,7 @@ export default function Dashboard() {
         to: dateRange.to,
         campaignType 
       });
-      const response = await fetch(`/api/countries?${params}`);
+      const response = await authFetch(`/api/countries?${params}`);
       const data = await response.json();
       if (data.error) throw new Error(data.error);
       return data;

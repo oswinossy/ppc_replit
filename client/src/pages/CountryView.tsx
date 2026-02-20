@@ -15,6 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { format, subDays } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
+import { authFetch } from "@/lib/queryClient";
 import { useSearchParams } from "@/hooks/useSearchParams";
 
 export default function CountryView() {
@@ -41,7 +42,7 @@ export default function CountryView() {
         campaignType,
         convertToEur: 'false' // Display in local currency for country-specific views
       });
-      const response = await fetch(`/api/kpis?${params}`);
+      const response = await authFetch(`/api/kpis?${params}`);
       return response.json();
     },
     refetchInterval: 3600000, // Auto-refresh every hour
@@ -57,7 +58,7 @@ export default function CountryView() {
         campaignType,
         convertToEur: 'false' // Display in local currency for country-specific views
       });
-      const response = await fetch(`/api/campaigns?${params}`);
+      const response = await authFetch(`/api/campaigns?${params}`);
       return response.json();
     },
     refetchInterval: 3600000, // Auto-refresh every hour
@@ -74,7 +75,7 @@ export default function CountryView() {
         campaignType,
         convertToEur: 'false' // Display in local currency for country-specific views
       });
-      const response = await fetch(`/api/chart-data?${params}`);
+      const response = await authFetch(`/api/chart-data?${params}`);
       return response.json();
     },
     refetchInterval: 3600000, // Auto-refresh every hour

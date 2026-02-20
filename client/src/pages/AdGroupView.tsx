@@ -16,7 +16,7 @@ import { useState } from "react";
 import { format, subDays } from "date-fns";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, authFetch, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useSearchParams } from "@/hooks/useSearchParams";
 
@@ -56,7 +56,7 @@ export default function AdGroupView() {
         params.append('country', countryCode);
         params.append('convertToEur', 'false');
       }
-      const response = await fetch(`/api/kpis?${params}`);
+      const response = await authFetch(`/api/kpis?${params}`);
       return response.json();
     },
     refetchInterval: 3600000, // Auto-refresh every hour
@@ -80,7 +80,7 @@ export default function AdGroupView() {
         params.append('country', countryCode);
         params.append('convertToEur', 'false');
       }
-      const response = await fetch(`/api/search-terms?${params}`);
+      const response = await authFetch(`/api/search-terms?${params}`);
       
       // If error (e.g., multi-currency issue or missing ACOS target), handle appropriately
       if (!response.ok) {
@@ -97,7 +97,7 @@ export default function AdGroupView() {
           if (campaignId) {
             retryParams.append('campaignId', campaignId);
           }
-          const retryResponse = await fetch(`/api/search-terms?${retryParams}`);
+          const retryResponse = await authFetch(`/api/search-terms?${retryParams}`);
           if (!retryResponse.ok) {
             throw new Error('Failed to fetch search terms');
           }
@@ -114,7 +114,7 @@ export default function AdGroupView() {
 
   const generateRecommendationsMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch('/api/recommendations/generate', {
+      const response = await authFetch('/api/recommendations/generate', {
         method: 'POST',
         body: JSON.stringify({
           scope: 'ad_group',
