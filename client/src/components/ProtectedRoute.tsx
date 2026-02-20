@@ -3,7 +3,7 @@ import { Redirect } from 'wouter';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, isPasswordSetupRequired } = useAuth();
 
   if (loading) {
     return (
@@ -15,6 +15,12 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
 
   if (!user) {
     return <Redirect to="/login" />;
+  }
+
+  // If the user arrived via invite/recovery and hasn't set a password yet,
+  // redirect them to the password setup page instead of the dashboard
+  if (isPasswordSetupRequired) {
+    return <Redirect to="/reset-password" />;
   }
 
   return <>{children}</>;
