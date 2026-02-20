@@ -1,11 +1,7 @@
-import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { startScheduler } from "./scheduler";
-import { supabaseAdmin } from "./supabase";
-
-
 
 const app = express();
 
@@ -54,32 +50,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Auth middleware: protect all /api/* routes (except /api/auth/*)
-app.use("/api", async (req: Request, res: Response, next: NextFunction) => {
-  // Skip auth for auth-related endpoints and health check
-  if (req.path.startsWith("/auth") || req.path === "/health") {
-    return next();
-  }
-
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "Missing or invalid authorization header" });
-  }
-
-  const token = authHeader.substring(7);
-  try {
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !user) {
-      return res.status(401).json({ message: "Invalid or expired token" });
-    }
-    // Attach user to request for downstream handlers
-    (req as any).user = user;
-    next();
-  } catch {
-    return res.status(401).json({ message: "Authentication failed" });
-  }
-});
-
 (async () => {
   const server = await registerRoutes(app);
 
@@ -105,8 +75,12 @@ app.use("/api", async (req: Request, res: Response, next: NextFunction) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen(port, "localhost", () => {
-  log(`serving on port ${port}`);
-  startScheduler();
-});
+  server.listen({
+    port,
+    host: "0.0.0.0",
+    reusePort: true,
+  }, () => {
+    log(`serving on port ${port}`);
+    startScheduler();
+  });
 })();

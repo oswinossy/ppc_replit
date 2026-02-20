@@ -19,7 +19,6 @@ import { useState, useEffect } from "react";
 import { format, subDays } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { authFetch } from "@/lib/queryClient";
 import { useSearchParams } from "@/hooks/useSearchParams";
 
 type ViewMode = 'search-terms' | 'placements';
@@ -70,7 +69,7 @@ export default function CampaignView() {
         params.append('country', countryCode);
         params.append('convertToEur', 'false');
       }
-      const response = await authFetch(`/api/kpis?${params}`);
+      const response = await fetch(`/api/kpis?${params}`);
       return response.json();
     },
     refetchInterval: 3600000, // Auto-refresh every hour
@@ -85,7 +84,7 @@ export default function CampaignView() {
         to: dateRange.to,
         campaignType
       });
-      const response = await authFetch(`/api/ad-groups?${params}`);
+      const response = await fetch(`/api/ad-groups?${params}`);
       return response.json();
     },
     refetchInterval: 3600000, // Auto-refresh every hour
@@ -101,7 +100,7 @@ export default function CampaignView() {
         to: dateRange.to,
         campaignType
       });
-      const response = await authFetch(`/api/campaign-placements?${params}`);
+      const response = await fetch(`/api/campaign-placements?${params}`);
       return response.json();
     },
     refetchInterval: 3600000, // Auto-refresh every hour
@@ -122,7 +121,7 @@ export default function CampaignView() {
         params.append('country', countryCode);
         params.append('convertToEur', 'false');
       }
-      const response = await authFetch(`/api/chart-data?${params}`);
+      const response = await fetch(`/api/chart-data?${params}`);
       return response.json();
     },
     refetchInterval: 3600000, // Auto-refresh every hour
@@ -135,7 +134,7 @@ export default function CampaignView() {
       const params = new URLSearchParams({ campaignId });
       if (countryCode) params.append('country', countryCode);
       if (campaignType) params.append('campaignType', campaignType === 'brands' ? 'SB' : 'SP');
-      const response = await authFetch(`/api/campaign-t0?${params}`);
+      const response = await fetch(`/api/campaign-t0?${params}`);
       return response.json();
     },
     enabled: !!countryCode && campaignType !== 'display',

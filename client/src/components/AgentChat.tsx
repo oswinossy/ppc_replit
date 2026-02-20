@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Send, Bot, User, Loader2, X, MessageSquare, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { authFetch } from "@/lib/queryClient";
 
 interface Message {
   id: string;
@@ -59,7 +58,7 @@ export function AgentChat() {
     setStreamingContent("");
 
     try {
-      const response = await authFetch("/api/agent/query", {
+      const response = await fetch("/api/agent/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: userMessage.content, stream: true }),

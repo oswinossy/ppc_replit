@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { apiRequest, authFetch } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 
 interface BiddingRecommendation {
   type: "keyword_bid" | "placement_adjustment";
@@ -121,7 +121,7 @@ export default function BiddingStrategy() {
 
   const { data, isLoading, error } = useQuery<BiddingStrategyResponse>({
     queryKey: ["/api/bidding-strategy", selectedCountry],
-    queryFn: () => authFetch(`/api/bidding-strategy?country=${selectedCountry}`).then(r => r.json()),
+    queryFn: () => fetch(`/api/bidding-strategy?country=${selectedCountry}`).then(r => r.json()),
     staleTime: 60000,
   });
 
