@@ -539,8 +539,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }> = [];
 
       if (campaignType === 'brands') {
-        // Query brand data - aggregate by keywordText (the targeting)
+        // Query brand data - aggregate by keywordText (the targeting), scoped to ad group
         const conditions = [];
+        if (adGroupId) conditions.push(sql`${brandSearchTerms.adGroupId}::text = ${adGroupId}`);
         if (from) conditions.push(gte(brandSearchTerms.date, from as string));
         if (to) conditions.push(lte(brandSearchTerms.date, to as string));
 
@@ -1117,19 +1118,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const acosWindow = 0.03; // ±3%
 
           if (campaignType === 'brands') {
-            // Check brand search terms for keyword recommendations
+            // Check brand search terms for keyword recommendations (per ad group)
             const keywordCheckResult = await sqlClient`
               SELECT COUNT(*) as count
               FROM (
                 SELECT
                   search_term,
+                  ad_group_id,
                   SUM(COALESCE(clicks, 0)) as total_clicks,
                   SUM(COALESCE(cost::numeric, 0)) as total_cost,
                   SUM(COALESCE(sales::numeric, 0)) as total_sales
                 FROM "s_brand_search_terms"
                 WHERE campaign_id::text = ${campaignId as string}
                   AND country = ${campaignCountry}
-                GROUP BY search_term
+                GROUP BY search_term, ad_group_id
                 HAVING SUM(COALESCE(clicks, 0)) >= 30
               ) as keywords
               WHERE
@@ -1141,19 +1143,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             keywordRecCount = Number(keywordCheckResult[0]?.count || 0);
             hasKeywordRecs = keywordRecCount > 0;
           } else {
-            // Check product search terms for keyword recommendations
+            // Check product search terms for keyword recommendations (per ad group)
             const keywordCheckResult = await sqlClient`
               SELECT COUNT(*) as count
               FROM (
                 SELECT
                   keyword,
+                  "adGroupId",
                   SUM(COALESCE(clicks, 0)) as total_clicks,
                   SUM(COALESCE(cost, 0)) as total_cost,
                   SUM(COALESCE(CAST(NULLIF("sales30d", '') AS NUMERIC), 0)) as total_sales
                 FROM "s_products_search_terms"
                 WHERE "campaignId"::text = ${campaignId as string}
                   AND country = ${campaignCountry}
-                GROUP BY keyword
+                GROUP BY keyword, "adGroupId"
                 HAVING SUM(COALESCE(clicks, 0)) >= 30
               ) as keywords
               WHERE
