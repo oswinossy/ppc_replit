@@ -11,10 +11,20 @@ export default function AuthCallbackPage() {
     const queryParams = new URLSearchParams(window.location.search);
     const queryType = queryParams.get('type');
 
+    // Check if this is an invite flow (flag set in supabase.ts before hash was cleared)
+    const isInviteFlow = sessionStorage.getItem('passwordSetupRequired') === 'true';
+
     // Listen for auth state changes from Supabase processing the URL tokens
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // PASSWORD_RECOVERY is fired for both invite and forgot-password flows
+      // PASSWORD_RECOVERY is fired for forgot-password flows
       if (event === 'PASSWORD_RECOVERY' || queryType === 'recovery') {
+        navigate('/reset-password');
+        return;
+      }
+
+      // Invite flow: GoTrueClient fires SIGNED_IN (not PASSWORD_RECOVERY) for type=invite.
+      // We detect it via the sessionStorage flag set in supabase.ts.
+      if (event === 'SIGNED_IN' && isInviteFlow) {
         navigate('/reset-password');
         return;
       }
@@ -25,9 +35,9 @@ export default function AuthCallbackPage() {
         return;
       }
 
-      // If session established without specific event type, check query params
+      // If session established without specific event type, check flags
       if (session && event === 'INITIAL_SESSION') {
-        if (queryType === 'recovery') {
+        if (queryType === 'recovery' || isInviteFlow) {
           navigate('/reset-password');
         } else {
           navigate('/');
@@ -38,6 +48,7 @@ export default function AuthCallbackPage() {
 
     // Fallback: if no auth event fires within 5 seconds, redirect to login
     const timeout = setTimeout(() => {
+      sessionStorage.removeItem('passwordSetupRequired');
       setMessage('Session expired. Redirecting to login...');
       navigate('/login');
     }, 5000);

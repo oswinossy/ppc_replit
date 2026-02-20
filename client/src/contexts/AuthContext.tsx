@@ -19,7 +19,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isPasswordSetupRequired, setIsPasswordSetupRequired] = useState(false);
+  const [isPasswordSetupRequired, setIsPasswordSetupRequired] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('passwordSetupRequired') === 'true';
+    }
+    return false;
+  });
 
   useEffect(() => {
     // Get initial session
@@ -35,9 +40,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(session?.user ?? null);
       setLoading(false);
 
-      // Detect invite or password recovery flows
-      // Supabase fires PASSWORD_RECOVERY for both invite and forgot-password links
+      // Detect password recovery flow (from forgot-password link)
       if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordSetupRequired(true);
+      }
+
+      // Detect invite flow: GoTrueClient fires SIGNED_IN (not PASSWORD_RECOVERY) for
+      // type=invite. The sessionStorage flag was set in supabase.ts before the client
+      // processed and cleared the URL hash.
+      if (event === 'SIGNED_IN' && sessionStorage.getItem('passwordSetupRequired') === 'true') {
         setIsPasswordSetupRequired(true);
       }
     });
@@ -47,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearPasswordSetupRequired = () => {
     setIsPasswordSetupRequired(false);
+    sessionStorage.removeItem('passwordSetupRequired');
   };
 
   const signIn = async (email: string, password: string) => {
