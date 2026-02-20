@@ -9,7 +9,10 @@ import ACOSBadge from "@/components/ACOSBadge";
 import CurrencyBadge from "@/components/CurrencyBadge";
 import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
-import { Download, TrendingUp } from "lucide-react";
+import { Download, TrendingUp, LogOut } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -21,6 +24,7 @@ import { useSearchParams } from "@/hooks/useSearchParams";
 export default function CountryView() {
   const [, params] = useRoute("/country/:code");
   const [, setLocation] = useLocation();
+  const { user, signOut } = useAuth();
   const countryCode = params?.code || "FR";
   const { campaignType } = useSearchParams();
   const [dateRange, setDateRange] = useState<{ from: string; to: string }>(() => {
@@ -145,6 +149,23 @@ export default function CountryView() {
               Export Negatives
             </Button>
             <ThemeToggle />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="text-sm">{user?.email?.[0]?.toUpperCase() ?? "U"}</AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel className="font-normal text-sm text-muted-foreground">{user?.email}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => signOut()}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>

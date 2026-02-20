@@ -7,7 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowDown, ArrowUp, Check, Download, ChevronRight, TrendingDown, TrendingUp, Target, Info, Clock, Zap, AlertTriangle, Settings, Layers } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Download, ChevronRight, TrendingDown, TrendingUp, Target, Info, Clock, Zap, AlertTriangle, Settings, Layers, LogOut } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -108,6 +111,7 @@ const formatCurrency = (value: number, country: string): string => {
 };
 
 export default function BiddingStrategy() {
+  const { user, signOut } = useAuth();
   const [selectedCountry, setSelectedCountry] = useState("DE");
   const [implementDialog, setImplementDialog] = useState<BiddingRecommendation | null>(null);
   const [weightSettingsOpen, setWeightSettingsOpen] = useState(false);
@@ -242,6 +246,23 @@ export default function BiddingStrategy() {
               <Download className="h-4 w-4 mr-2" />
               Export
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="text-sm">{user?.email?.[0]?.toUpperCase() ?? "U"}</AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel className="font-normal text-sm text-muted-foreground">{user?.email}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => signOut()}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 

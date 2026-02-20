@@ -10,7 +10,10 @@ import CurrencyBadge from "@/components/CurrencyBadge";
 import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
-import { Download, TrendingUp, Target, Info, Clock } from "lucide-react";
+import { Download, TrendingUp, Target, Info, Clock, LogOut } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Link } from "wouter";
 import { useLocation, useRoute } from "wouter";
@@ -27,6 +30,7 @@ type ViewMode = 'search-terms' | 'placements';
 export default function CampaignView() {
   const [, params] = useRoute("/campaign/:id");
   const [, setLocation] = useLocation();
+  const { user, signOut } = useAuth();
   const campaignId = params?.id || "";
   
   // Extract country, campaignType, and view from query parameters
@@ -206,6 +210,23 @@ export default function CampaignView() {
               Export Negatives
             </Button>
             <ThemeToggle />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="text-sm">{user?.email?.[0]?.toUpperCase() ?? "U"}</AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel className="font-normal text-sm text-muted-foreground">{user?.email}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => signOut()}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>

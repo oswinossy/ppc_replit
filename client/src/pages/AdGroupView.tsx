@@ -9,7 +9,10 @@ import RecommendationCard from "@/components/RecommendationCard";
 import CurrencyBadge from "@/components/CurrencyBadge";
 import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
-import { Download, Sparkles } from "lucide-react";
+import { Download, Sparkles, LogOut } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { useRoute, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
@@ -22,6 +25,7 @@ import { useSearchParams } from "@/hooks/useSearchParams";
 
 export default function AdGroupView() {
   const [, params] = useRoute("/ad-group/:id");
+  const { user, signOut } = useAuth();
   const adGroupId = params?.id || "";
   
   // Extract country, campaignType, and campaignId from query parameters
@@ -221,6 +225,23 @@ export default function AdGroupView() {
               Export Negatives
             </Button>
             <ThemeToggle />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="text-sm">{user?.email?.[0]?.toUpperCase() ?? "U"}</AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel className="font-normal text-sm text-muted-foreground">{user?.email}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => signOut()}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>
