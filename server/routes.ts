@@ -24,7 +24,20 @@ import {
 } from "./migrations/biddingStrategy";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  
+
+  // Auth endpoint - returns current user info
+  app.get("/api/auth/me", (req, res) => {
+    const user = (req as any).user;
+    if (!user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    res.json({
+      id: user.id,
+      email: user.email,
+      created_at: user.created_at,
+    });
+  });
+
   // KPI aggregation endpoint - filters by campaign type
   app.get("/api/kpis", async (req, res) => {
     // Check cache first
