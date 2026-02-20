@@ -10,7 +10,10 @@ import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, TrendingUp, Globe, Target } from "lucide-react";
+import { Download, TrendingUp, Globe, Target, LogOut } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Link } from "wouter";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -21,6 +24,7 @@ import { format, subDays, differenceInDays, parseISO } from "date-fns";
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
+  const { user, signOut } = useAuth();
   // Initialize with last 60 days to load data immediately
   const [dateRange, setDateRange] = useState<{ from: string; to: string }>(() => {
     const to = new Date();
@@ -217,6 +221,23 @@ export default function Dashboard() {
               Export Negatives
             </Button>
             <ThemeToggle />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="text-sm">{user?.email?.[0]?.toUpperCase() ?? "U"}</AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel className="font-normal text-sm text-muted-foreground">{user?.email}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => signOut()}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>
