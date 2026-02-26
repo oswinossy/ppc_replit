@@ -1623,26 +1623,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Export negative keywords as Excel
   app.get("/api/exports/negatives.xlsx", async (req, res) => {
     try {
-      const { adGroupId, campaignId } = req.query;
-      
-      const conditions = [];
-      if (adGroupId) conditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
-      if (campaignId) conditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
+      const { adGroupId, campaignId, country, from, to, campaignType } = req.query;
+      const isBrands = campaignType === 'brands';
 
-      const results = await db
-        .select({
-          targeting: productSearchTerms.targeting,
-          campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
-          adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
-          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
-          impressions: sql<number>`0`,
-          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
-        })
-        .from(productSearchTerms)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(productSearchTerms.targeting);
+      let results: Array<{
+        targeting: string | null;
+        campaignName: string | null;
+        adGroupName: string | null;
+        clicks: number;
+        impressions: number;
+        cost: number;
+        sales: number;
+        orders: number;
+      }>;
+
+      if (isBrands) {
+        // Query SB search terms table
+        const conditions = [];
+        if (adGroupId) conditions.push(sql`${brandSearchTerms.adGroupId}::text = ${adGroupId}`);
+        if (campaignId) conditions.push(sql`${brandSearchTerms.campaignId}::text = ${campaignId}`);
+        if (country) conditions.push(eq(brandSearchTerms.country, country as string));
+        if (from) conditions.push(sql`${brandSearchTerms.date} >= ${from}`);
+        if (to) conditions.push(sql`${brandSearchTerms.date} <= ${to}`);
+
+        results = await db
+          .select({
+            targeting: brandSearchTerms.searchTerm,
+            campaignName: sql<string>`MAX(${brandSearchTerms.campaignName})`,
+            adGroupName: sql<string>`MAX(${brandSearchTerms.adGroupName})`,
+            clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+            impressions: sql<number>`COALESCE(SUM(${brandSearchTerms.impressions}), 0)`,
+            cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}::numeric), 0)`,
+            sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+          })
+          .from(brandSearchTerms)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .groupBy(brandSearchTerms.searchTerm);
+      } else {
+        // Query SP search terms table (default)
+        const conditions = [];
+        if (adGroupId) conditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
+        if (campaignId) conditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
+        if (country) conditions.push(eq(productSearchTerms.country, country as string));
+        if (from) conditions.push(sql`${productSearchTerms.date} >= ${from}`);
+        if (to) conditions.push(sql`${productSearchTerms.date} <= ${to}`);
+
+        results = await db
+          .select({
+            targeting: productSearchTerms.targeting,
+            campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
+            adGroupName: sql<string>`MAX(${productSearchTerms.adGroupName})`,
+            clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+            impressions: sql<number>`0`,
+            cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
+          })
+          .from(productSearchTerms)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .groupBy(productSearchTerms.targeting);
+      }
 
       const negatives = detectNegativeKeywords(
         results.map(row => ({
