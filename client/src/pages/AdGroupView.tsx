@@ -162,23 +162,41 @@ export default function AdGroupView() {
   const recommendations = recommendationsData?.recommendations;
 
   const handleExportNegatives = async () => {
-    const params = new URLSearchParams({ 
+    const params = new URLSearchParams({
       adGroupId,
       campaignType,
-      from: dateRange.from, 
-      to: dateRange.to 
+      from: dateRange.from,
+      to: dateRange.to
     });
-    window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
+    const response = await authFetch(`/api/exports/negatives.xlsx?${params}`);
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `negative-keywords-${adGroupId}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   };
 
   const handleExportRecommendations = async () => {
-    const params = new URLSearchParams({ 
+    const params = new URLSearchParams({
       adGroupId,
       campaignType,
-      from: dateRange.from, 
-      to: dateRange.to 
+      from: dateRange.from,
+      to: dateRange.to
     });
-    window.open(`/api/exports/recommendations.csv?${params}`, '_blank');
+    const response = await authFetch(`/api/exports/recommendations.csv?${params}`);
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bid-recommendations-${adGroupId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   };
 
   const kpiCards = (kpis && !kpis.error) ? [

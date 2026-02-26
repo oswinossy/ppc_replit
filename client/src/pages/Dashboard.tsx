@@ -97,7 +97,16 @@ export default function Dashboard() {
     if (selectedCountry !== 'all') {
       params.set('country', selectedCountry);
     }
-    window.open(`/api/exports/negatives.xlsx?${params}`, '_blank');
+    const response = await authFetch(`/api/exports/negatives.xlsx?${params}`);
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'negative-keywords.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   };
 
   const getPeriodLabel = () => {

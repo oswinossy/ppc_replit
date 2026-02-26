@@ -1833,38 +1833,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Export bid recommendations as CSV - supports country, campaign, and ad group level exports
   app.get("/api/exports/recommendations.csv", async (req, res) => {
     try {
-      const { adGroupId, campaignId, country, from, to } = req.query;
-      
-      const conditions = [];
-      if (adGroupId) conditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
-      if (campaignId) conditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
-      if (country) conditions.push(sql`${productSearchTerms.country} = ${country}`);
-      if (from) conditions.push(gte(productSearchTerms.date, from as string));
-      if (to) conditions.push(lte(productSearchTerms.date, to as string));
+      const { adGroupId, campaignId, country, from, to, campaignType } = req.query;
+      const isBrands = campaignType === 'brands';
 
-      // Include campaign and ad group names for context in country/campaign-level exports
-      // Group by all context fields to ensure correct attribution
-      const results = await db
-        .select({
-          targeting: productSearchTerms.targeting,
-          matchType: productSearchTerms.matchType,
-          campaignName: productSearchTerms.campaignName,
-          adGroupName: productSearchTerms.adGroupName,
-          keywordBid: sql<number>`MAX(${productSearchTerms.keywordBid})`,
-          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
-          impressions: sql<number>`0`,
-          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
-        })
-        .from(productSearchTerms)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .groupBy(
-          productSearchTerms.targeting, 
-          productSearchTerms.matchType,
-          productSearchTerms.campaignName,
-          productSearchTerms.adGroupName
-        );
+      let results: Array<{
+        targeting: string | null;
+        matchType: string | null;
+        campaignName: string | null;
+        adGroupName: string | null;
+        keywordBid: number;
+        clicks: number;
+        impressions: number;
+        cost: number;
+        sales: number;
+        orders: number;
+      }>;
+
+      if (isBrands) {
+        // Query SB search terms table
+        const conditions = [];
+        if (adGroupId) conditions.push(sql`${brandSearchTerms.adGroupId}::text = ${adGroupId}`);
+        if (campaignId) conditions.push(sql`${brandSearchTerms.campaignId}::text = ${campaignId}`);
+        if (country) conditions.push(eq(brandSearchTerms.country, country as string));
+        if (from) conditions.push(sql`${brandSearchTerms.date} >= ${from}`);
+        if (to) conditions.push(sql`${brandSearchTerms.date} <= ${to}`);
+
+        results = await db
+          .select({
+            targeting: brandSearchTerms.searchTerm,
+            matchType: brandSearchTerms.matchType,
+            campaignName: brandSearchTerms.campaignName,
+            adGroupName: brandSearchTerms.adGroupName,
+            keywordBid: sql<number>`MAX(${brandSearchTerms.keywordBid}::numeric)`,
+            clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+            impressions: sql<number>`COALESCE(SUM(${brandSearchTerms.impressions}), 0)`,
+            cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}::numeric), 0)`,
+            sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+          })
+          .from(brandSearchTerms)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .groupBy(
+            brandSearchTerms.searchTerm,
+            brandSearchTerms.matchType,
+            brandSearchTerms.campaignName,
+            brandSearchTerms.adGroupName
+          );
+      } else {
+        // Query SP search terms table (default)
+        const conditions = [];
+        if (adGroupId) conditions.push(sql`${productSearchTerms.adGroupId}::text = ${adGroupId}`);
+        if (campaignId) conditions.push(sql`${productSearchTerms.campaignId}::text = ${campaignId}`);
+        if (country) conditions.push(eq(productSearchTerms.country, country as string));
+        if (from) conditions.push(gte(productSearchTerms.date, from as string));
+        if (to) conditions.push(lte(productSearchTerms.date, to as string));
+
+        // Include campaign and ad group names for context in country/campaign-level exports
+        // Group by all context fields to ensure correct attribution
+        results = await db
+          .select({
+            targeting: productSearchTerms.targeting,
+            matchType: productSearchTerms.matchType,
+            campaignName: productSearchTerms.campaignName,
+            adGroupName: productSearchTerms.adGroupName,
+            keywordBid: sql<number>`MAX(${productSearchTerms.keywordBid})`,
+            clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+            impressions: sql<number>`0`,
+            cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
+          })
+          .from(productSearchTerms)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .groupBy(
+            productSearchTerms.targeting,
+            productSearchTerms.matchType,
+            productSearchTerms.campaignName,
+            productSearchTerms.adGroupName
+          );
+      }
 
       const targetingData = results.map(row => ({
         targeting: row.targeting || '',

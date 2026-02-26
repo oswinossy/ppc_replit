@@ -186,15 +186,21 @@ export default function BiddingStrategy() {
   const totalWeight = editWeights.t0 + editWeights.d30 + editWeights.d365 + editWeights.lifetime;
   const weightsValid = totalWeight === 100;
 
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     if (!data?.recommendations?.length) return;
-    
+
     // Use the backend Excel export endpoint which includes cross-reference info
     const url = `/api/exports/bidding-strategy.xlsx?country=${selectedCountry}`;
-    const a = document.createElement("a");
-    a.href = url;
+    const response = await authFetch(url);
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
     a.download = `bidding-strategy-${selectedCountry}-${new Date().toISOString().split("T")[0]}.xlsx`;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
   };
 
   const keywordRecs = useMemo(() => 
