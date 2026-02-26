@@ -169,6 +169,10 @@ export default function AdGroupView() {
       to: dateRange.to
     });
     const response = await authFetch(`/api/exports/negatives.xlsx?${params}`);
+    if (!response.ok) {
+      alert('Export failed. Please try again.');
+      return;
+    }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -188,6 +192,10 @@ export default function AdGroupView() {
       to: dateRange.to
     });
     const response = await authFetch(`/api/exports/recommendations.csv?${params}`);
+    if (!response.ok) {
+      alert('Export failed. Please try again.');
+      return;
+    }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');

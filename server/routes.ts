@@ -3228,11 +3228,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get only the most recent recommendation per unique (campaign_id, ad_group_id, targeting, match_type, recommendation_type)
       const historyQuery = campaignIdFilter
         ? sql`SELECT DISTINCT ON (campaign_id, COALESCE(ad_group_id, ''), targeting, COALESCE(match_type, ''), recommendation_type) *
-              FROM recommendation_history
+              FROM s_recommendation_history
               WHERE country = ${countryStr} AND campaign_id = ${campaignIdFilter}
               ORDER BY campaign_id, COALESCE(ad_group_id, ''), targeting, COALESCE(match_type, ''), recommendation_type, created_at DESC`
         : sql`SELECT DISTINCT ON (campaign_id, COALESCE(ad_group_id, ''), targeting, COALESCE(match_type, ''), recommendation_type) *
-              FROM recommendation_history
+              FROM s_recommendation_history
               WHERE country = ${countryStr}
               ORDER BY campaign_id, COALESCE(ad_group_id, ''), targeting, COALESCE(match_type, ''), recommendation_type, created_at DESC`;
 

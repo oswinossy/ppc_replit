@@ -98,6 +98,10 @@ export default function Dashboard() {
       params.set('country', selectedCountry);
     }
     const response = await authFetch(`/api/exports/negatives.xlsx?${params}`);
+    if (!response.ok) {
+      alert('Export failed. Please try again.');
+      return;
+    }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');

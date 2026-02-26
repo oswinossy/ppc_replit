@@ -154,6 +154,10 @@ export default function CampaignView() {
       campaignType
     });
     const response = await authFetch(`/api/exports/negatives.xlsx?${params}`);
+    if (!response.ok) {
+      alert('Export failed. Please try again.');
+      return;
+    }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -173,6 +177,10 @@ export default function CampaignView() {
       params.append('country', countryCode);
     }
     const response = await authFetch(`/api/exports/bid-recommendations.xlsx?${params}`);
+    if (!response.ok) {
+      alert('Export failed. Please try again.');
+      return;
+    }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');

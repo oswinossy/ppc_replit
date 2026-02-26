@@ -192,6 +192,10 @@ export default function BiddingStrategy() {
     // Use the backend Excel export endpoint which includes cross-reference info
     const url = `/api/exports/bidding-strategy.xlsx?country=${selectedCountry}`;
     const response = await authFetch(url);
+    if (!response.ok) {
+      alert('Export failed. Please try again.');
+      return;
+    }
     const blob = await response.blob();
     const downloadUrl = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
