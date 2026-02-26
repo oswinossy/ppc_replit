@@ -6,7 +6,7 @@ export async function createWeightConfigTable(): Promise<void> {
   
   try {
     await sql`
-      CREATE TABLE IF NOT EXISTS "weight_config" (
+      CREATE TABLE IF NOT EXISTS "s_weight_config" (
         id SERIAL PRIMARY KEY,
         country TEXT NOT NULL DEFAULT 'ALL',
         t0_weight NUMERIC NOT NULL DEFAULT 0.35,
@@ -20,12 +20,12 @@ export async function createWeightConfigTable(): Promise<void> {
     
     // Insert global default if not exists
     await sql`
-      INSERT INTO "weight_config" (country, t0_weight, d30_weight, d365_weight, lifetime_weight)
+      INSERT INTO "s_weight_config" (country, t0_weight, d30_weight, d365_weight, lifetime_weight)
       VALUES ('ALL', 0.35, 0.25, 0.25, 0.15)
       ON CONFLICT (country) DO NOTHING
     `;
     
-    console.log('weight_config table created/verified with global defaults');
+    console.log('s_weight_config table created/verified with global defaults');
   } finally {
     await sql.end();
   }
@@ -37,7 +37,7 @@ export async function createRecommendationHistoryTable(): Promise<void> {
   
   try {
     await sql`
-      CREATE TABLE IF NOT EXISTS "recommendation_history" (
+      CREATE TABLE IF NOT EXISTS "s_recommendation_history" (
         id SERIAL PRIMARY KEY,
         country TEXT NOT NULL,
         campaign_id TEXT NOT NULL,
@@ -81,19 +81,19 @@ export async function createRecommendationHistoryTable(): Promise<void> {
     
     // Create indexes for common queries
     await sql`
-      CREATE INDEX IF NOT EXISTS idx_rec_history_country ON "recommendation_history" (country)
+      CREATE INDEX IF NOT EXISTS idx_rec_history_country ON "s_recommendation_history" (country)
     `;
     await sql`
-      CREATE INDEX IF NOT EXISTS idx_rec_history_campaign ON "recommendation_history" (campaign_id)
+      CREATE INDEX IF NOT EXISTS idx_rec_history_campaign ON "s_recommendation_history" (campaign_id)
     `;
     await sql`
-      CREATE INDEX IF NOT EXISTS idx_rec_history_linked_group ON "recommendation_history" (linked_group_id)
+      CREATE INDEX IF NOT EXISTS idx_rec_history_linked_group ON "s_recommendation_history" (linked_group_id)
     `;
     await sql`
-      CREATE INDEX IF NOT EXISTS idx_rec_history_created ON "recommendation_history" (created_at DESC)
+      CREATE INDEX IF NOT EXISTS idx_rec_history_created ON "s_recommendation_history" (created_at DESC)
     `;
     
-    console.log('recommendation_history table created/verified with indexes');
+    console.log('s_recommendation_history table created/verified with indexes');
     
     // Add new columns if they don't exist (for existing tables)
     // Using NUMERIC for orders as source data may have decimals due to aggregation
@@ -111,7 +111,7 @@ export async function createRecommendationHistoryTable(): Promise<void> {
     for (const col of newColumns) {
       const colName = col.split(' ')[0];
       try {
-        await sql`ALTER TABLE "recommendation_history" ADD COLUMN IF NOT EXISTS ${sql.unsafe(col)}`;
+        await sql`ALTER TABLE "s_recommendation_history" ADD COLUMN IF NOT EXISTS ${sql.unsafe(col)}`;
       } catch (e: any) {
         // Column may already exist
         if (!e.message?.includes('already exists')) {
@@ -124,13 +124,13 @@ export async function createRecommendationHistoryTable(): Promise<void> {
     const ordersColumns = ['pre_orders_t0', 'pre_orders_30d', 'pre_orders_365d', 'pre_orders_lifetime'];
     for (const colName of ordersColumns) {
       try {
-        await sql`ALTER TABLE "recommendation_history" ALTER COLUMN ${sql.unsafe(colName)} TYPE NUMERIC USING ${sql.unsafe(colName)}::NUMERIC`;
+        await sql`ALTER TABLE "s_recommendation_history" ALTER COLUMN ${sql.unsafe(colName)} TYPE NUMERIC USING ${sql.unsafe(colName)}::NUMERIC`;
       } catch (e: any) {
         // Column may already be NUMERIC
         console.log(`Note: Column ${colName} type check: ${e.message?.substring(0, 50)}`);
       }
     }
-    console.log('recommendation_history new columns verified');
+    console.log('s_recommendation_history new columns verified');
   } finally {
     await sql.end();
   }
@@ -149,11 +149,11 @@ export async function getWeightsForCountry(country: string): Promise<{
     // Try country-specific first, then fall back to global
     const result = await sql`
       SELECT t0_weight, d30_weight, d365_weight, lifetime_weight 
-      FROM "weight_config"
+      FROM "s_weight_config"
       WHERE country = ${country}
       UNION ALL
       SELECT t0_weight, d30_weight, d365_weight, lifetime_weight 
-      FROM "weight_config"
+      FROM "s_weight_config"
       WHERE country = 'ALL'
       LIMIT 1
     `;
@@ -183,7 +183,7 @@ export async function updateWeightsForCountry(
   
   try {
     await sql`
-      INSERT INTO "weight_config" (country, t0_weight, d30_weight, d365_weight, lifetime_weight, updated_at)
+      INSERT INTO "s_weight_config" (country, t0_weight, d30_weight, d365_weight, lifetime_weight, updated_at)
       VALUES (${country}, ${weights.t0_weight}, ${weights.d30_weight}, ${weights.d365_weight}, ${weights.lifetime_weight}, NOW())
       ON CONFLICT (country) DO UPDATE SET
         t0_weight = EXCLUDED.t0_weight,
@@ -236,7 +236,7 @@ export async function saveRecommendation(rec: {
   
   try {
     const result = await sql`
-      INSERT INTO "recommendation_history" (
+      INSERT INTO "s_recommendation_history" (
         country, campaign_id, campaign_name, ad_group_id, ad_group_name,
         targeting, match_type, recommendation_type, placement, linked_group_id,
         old_value, recommended_value, pre_acos_t0, pre_acos_30d, pre_acos_365d,
@@ -268,7 +268,7 @@ export async function markRecommendationImplemented(id: number): Promise<void> {
   
   try {
     await sql`
-      UPDATE "recommendation_history"
+      UPDATE "s_recommendation_history"
       SET implemented_at = NOW()
       WHERE id = ${id}
     `;
@@ -288,14 +288,14 @@ export async function getRecommendationHistory(filters: {
   
   try {
     let query = sql`
-      SELECT * FROM "recommendation_history"
+      SELECT * FROM "s_recommendation_history"
       WHERE 1=1
     `;
     
     // Build dynamic query based on filters
     if (filters.country) {
       query = sql`
-        SELECT * FROM "recommendation_history"
+        SELECT * FROM "s_recommendation_history"
         WHERE country = ${filters.country}
         ${filters.campaign_id ? sql`AND campaign_id = ${filters.campaign_id}` : sql``}
         ${filters.implemented_only ? sql`AND implemented_at IS NOT NULL` : sql``}
@@ -304,7 +304,7 @@ export async function getRecommendationHistory(filters: {
       `;
     } else {
       query = sql`
-        SELECT * FROM "recommendation_history"
+        SELECT * FROM "s_recommendation_history"
         WHERE 1=1
         ${filters.campaign_id ? sql`AND campaign_id = ${filters.campaign_id}` : sql``}
         ${filters.implemented_only ? sql`AND implemented_at IS NOT NULL` : sql``}
