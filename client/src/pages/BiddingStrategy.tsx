@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { apiRequest, authFetch } from "@/lib/queryClient";
 
 interface BiddingRecommendation {
-  type: "keyword_bid" | "placement_adjustment";
+  type: "keyword_bid" | "brand_keyword_bid" | "placement_adjustment" | "brand_placement_adjustment";
   country: string;
   campaign_id: string;
   campaign_name: string;
@@ -113,6 +113,7 @@ const formatCurrency = (value: number, country: string): string => {
 export default function BiddingStrategy() {
   const { user, signOut } = useAuth();
   const [selectedCountry, setSelectedCountry] = useState("DE");
+  const [campaignType, setCampaignType] = useState<'products' | 'brands' | 'display'>('products');
   const [implementDialog, setImplementDialog] = useState<BiddingRecommendation | null>(null);
   const [weightSettingsOpen, setWeightSettingsOpen] = useState(false);
   const [editWeights, setEditWeights] = useState({
@@ -124,8 +125,8 @@ export default function BiddingStrategy() {
   const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery<BiddingStrategyResponse>({
-    queryKey: ["/api/bidding-strategy", selectedCountry],
-    queryFn: () => authFetch(`/api/bidding-strategy?country=${selectedCountry}`).then(r => r.json()),
+    queryKey: ["/api/bidding-strategy", selectedCountry, campaignType],
+    queryFn: () => authFetch(`/api/bidding-strategy?country=${selectedCountry}&campaignType=${campaignType}`).then(r => r.json()),
     staleTime: 60000,
   });
 
@@ -190,7 +191,7 @@ export default function BiddingStrategy() {
     if (!data?.recommendations?.length) return;
 
     // Use the backend Excel export endpoint which includes cross-reference info
-    const url = `/api/exports/bidding-strategy.xlsx?country=${selectedCountry}`;
+    const url = `/api/exports/bidding-strategy.xlsx?country=${selectedCountry}&campaignType=${campaignType}`;
     const response = await authFetch(url);
     if (!response.ok) {
       alert('Export failed. Please try again.');
@@ -207,8 +208,8 @@ export default function BiddingStrategy() {
     window.URL.revokeObjectURL(downloadUrl);
   };
 
-  const keywordRecs = useMemo(() => 
-    data?.recommendations?.filter(r => r.type === "keyword_bid") || [], 
+  const keywordRecs = useMemo(() =>
+    data?.recommendations?.filter(r => r.type === "keyword_bid" || r.type === "brand_keyword_bid") || [],
     [data?.recommendations]
   );
 
@@ -234,6 +235,42 @@ export default function BiddingStrategy() {
           </div>
           
           <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 p-1 bg-muted rounded-lg border-2 border-primary">
+              <button
+                onClick={() => setCampaignType('products')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  campaignType === 'products'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background'
+                }`}
+                data-testid="tab-campaign-products"
+              >
+                Products
+              </button>
+              <button
+                onClick={() => setCampaignType('brands')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  campaignType === 'brands'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background'
+                }`}
+                data-testid="tab-campaign-brands"
+              >
+                Brands
+              </button>
+              <button
+                onClick={() => setCampaignType('display')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  campaignType === 'display'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background'
+                }`}
+                data-testid="tab-campaign-display"
+              >
+                Display
+              </button>
+            </div>
+
             <Select value={selectedCountry} onValueChange={setSelectedCountry}>
               <SelectTrigger className="w-[180px]" data-testid="select-country">
                 <SelectValue placeholder="Select country" />
