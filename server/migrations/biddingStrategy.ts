@@ -2,7 +2,7 @@ import postgres from "postgres";
 
 export async function createWeightConfigTable(): Promise<void> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  const sql = postgres(connectionUrl);
+  const sql = postgres(connectionUrl, { ssl: 'require' });
   
   try {
     await sql`
@@ -33,7 +33,7 @@ export async function createWeightConfigTable(): Promise<void> {
 
 export async function createRecommendationHistoryTable(): Promise<void> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  const sql = postgres(connectionUrl);
+  const sql = postgres(connectionUrl, { ssl: 'require' });
   
   try {
     await sql`
@@ -143,7 +143,7 @@ export async function getWeightsForCountry(country: string): Promise<{
   lifetime_weight: number;
 }> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  const sql = postgres(connectionUrl);
+  const sql = postgres(connectionUrl, { ssl: 'require' });
   
   try {
     // Try country-specific first, then fall back to global
@@ -179,7 +179,7 @@ export async function updateWeightsForCountry(
   weights: { t0_weight: number; d30_weight: number; d365_weight: number; lifetime_weight: number }
 ): Promise<void> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  const sql = postgres(connectionUrl);
+  const sql = postgres(connectionUrl, { ssl: 'require' });
   
   try {
     await sql`
@@ -232,7 +232,7 @@ export async function saveRecommendation(rec: {
   reason?: string;
 }): Promise<number> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  const sql = postgres(connectionUrl);
+  const sql = postgres(connectionUrl, { ssl: 'require' });
   
   try {
     const result = await sql`
@@ -264,7 +264,7 @@ export async function saveRecommendation(rec: {
 
 export async function markRecommendationImplemented(id: number): Promise<void> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  const sql = postgres(connectionUrl);
+  const sql = postgres(connectionUrl, { ssl: 'require' });
   
   try {
     await sql`
@@ -284,7 +284,7 @@ export async function getRecommendationHistory(filters: {
   limit?: number;
 }): Promise<any[]> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  const sql = postgres(connectionUrl);
+  const sql = postgres(connectionUrl, { ssl: 'require' });
   
   try {
     let query = sql`

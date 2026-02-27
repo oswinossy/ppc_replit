@@ -45,14 +45,14 @@ export async function generateRecommendationsForCountry(country: string): Promis
 }
 
 async function generateKeywordRecommendationsForCountry(country: string, connectionUrl: string): Promise<number> {
-  const sqlClient = postgres(connectionUrl);
+  const sqlClient = postgres(connectionUrl, { ssl: 'require' });
 
   try {
     const weights = await getWeightsForCountry(country);
 
     const acosTargetsResult = await sqlClient`
       SELECT campaign_id, acos_target, campaign_name
-      FROM "ACOS_Target_Campaign"
+      FROM s_acos_target_campaign
       WHERE country = ${country}
     `;
     const acosTargetsMap = new Map(acosTargetsResult.map((r: any) => [r.campaign_id, { target: Number(r.acos_target), name: r.campaign_name }]));
@@ -393,14 +393,14 @@ async function processPlacementRecommendations(
 
 // Generate product placement recommendations using bid_adjustment_pct from s_products_placement
 async function generateProductPlacementRecommendationsForCountry(country: string, connectionUrl: string): Promise<number> {
-  const sqlClient = postgres(connectionUrl);
+  const sqlClient = postgres(connectionUrl, { ssl: 'require' });
   const MIN_CLICKS = 30;
   const ACOS_WINDOW = 10;
 
   try {
     const acosTargetsResult = await sqlClient`
       SELECT campaign_id, acos_target, campaign_name
-      FROM "ACOS_Target_Campaign"
+      FROM s_acos_target_campaign
       WHERE country = ${country}
     `;
     const acosTargetsMap = new Map(acosTargetsResult.map((r: any) => [r.campaign_id, { target: Number(r.acos_target), name: r.campaign_name }]));
@@ -490,14 +490,14 @@ const generatePlacementRecommendationsForCountry = generateProductPlacementRecom
 
 // Generate brand placement recommendations using bid_adjustment_pct from s_brand_placement
 async function generateBrandPlacementRecommendationsForCountry(country: string, connectionUrl: string): Promise<number> {
-  const sqlClient = postgres(connectionUrl);
+  const sqlClient = postgres(connectionUrl, { ssl: 'require' });
   const MIN_CLICKS = 30;
   const ACOS_WINDOW = 10;
 
   try {
     const acosTargetsResult = await sqlClient`
       SELECT campaign_id, acos_target, campaign_name
-      FROM "ACOS_Target_Campaign"
+      FROM s_acos_target_campaign
       WHERE country = ${country}
     `;
     const acosTargetsMap = new Map(acosTargetsResult.map((r: any) => [r.campaign_id, { target: Number(r.acos_target), name: r.campaign_name }]));

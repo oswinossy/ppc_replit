@@ -533,7 +533,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (acosTarget === null) {
           return res.status(400).json({ 
             error: 'ACOS target not configured',
-            message: `No ACOS target found for campaign ${campaignId}. Please add it to the ACOS_Target_Campaign table.`,
+            message: `No ACOS target found for campaign ${campaignId}. Please add it to the s_acos_target_campaign table.`,
             campaignId
           });
         }
@@ -727,7 +727,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/debug/placements", async (req, res) => {
     try {
       const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-      const sqlClient = postgres(connectionUrl);
+      const sqlClient = postgres(connectionUrl, { ssl: 'require' });
       try {
         // 1. Get actual column names from the table
         const columns = await sqlClient`
@@ -778,7 +778,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { campaignId, adGroupId, country, campaignType = 'products', from, to } = req.query;
       const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-      const sqlClient = postgres(connectionUrl);
+      const sqlClient = postgres(connectionUrl, { ssl: 'require' });
 
       let results: Array<{ placement: string | null; clicks: number; cost: number; sales: number; purchases: number }> = [];
 
@@ -880,7 +880,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const targetAcos = acosTarget !== null ? acosTarget * 100 : null;
 
       const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-      const sqlClient = postgres(connectionUrl);
+      const sqlClient = postgres(connectionUrl, { ssl: 'require' });
 
       // Query ALL placement data for the campaign based on campaign type
       let allResults: Array<{
@@ -1964,7 +1964,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (acosTarget === null) {
           return res.status(400).json({ 
             error: 'ACOS target not configured',
-            message: `No ACOS target found for campaign ${campaignId}. Please add it to the ACOS_Target_Campaign table.`,
+            message: `No ACOS target found for campaign ${campaignId}. Please add it to the s_acos_target_campaign table.`,
             campaignId
           });
         }
@@ -2375,7 +2375,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-      const sqlClient = postgres(connectionUrl);
+      const sqlClient = postgres(connectionUrl, { ssl: 'require' });
 
       // Get campaign T0 date from s_campaign_t0 lookup table
       const t0Result = await sqlClient`
@@ -2458,11 +2458,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Migration endpoint - creates ACOS_Target_Campaign table
+  // Migration endpoint - creates s_acos_target_campaign table
   app.post("/api/migrations/acos-targets", async (req, res) => {
     try {
       await createAcosTargetsTable();
-      res.json({ success: true, message: 'ACOS_Target_Campaign table created/verified' });
+      res.json({ success: true, message: 's_acos_target_campaign table created/verified' });
     } catch (error: any) {
       console.error('Migration error:', error);
       res.status(500).json({ success: false, error: error.message || 'Migration failed' });
@@ -2495,7 +2495,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (acosTarget === null) {
         return res.status(404).json({ 
           error: 'ACOS target not found',
-          message: `No ACOS target configured for campaign ${campaignId}. Please add it to the ACOS_Target_Campaign table.`
+          message: `No ACOS target configured for campaign ${campaignId}. Please add it to the s_acos_target_campaign table.`
         });
       }
       
@@ -2556,7 +2556,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/weights", async (req, res) => {
     try {
       const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-      const sqlClient = postgres(connectionUrl);
+      const sqlClient = postgres(connectionUrl, { ssl: 'require' });
       const result = await sqlClient`SELECT * FROM "weight_config" ORDER BY country`;
       await sqlClient.end();
       res.json(result);
@@ -2576,7 +2576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-      const sqlClient = postgres(connectionUrl);
+      const sqlClient = postgres(connectionUrl, { ssl: 'require' });
 
       // Get weights for this country
       const weights = await getWeightsForCountry(country as string);
@@ -2584,7 +2584,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get campaign-specific ACOS targets
       const acosTargetsResult = await sqlClient`
         SELECT campaign_id, acos_target, campaign_name 
-        FROM "ACOS_Target_Campaign" 
+        FROM s_acos_target_campaign 
         WHERE country = ${country as string}
       `;
       const acosTargetsMap = new Map(acosTargetsResult.map((r: any) => [r.campaign_id, { target: Number(r.acos_target), name: r.campaign_name }]));
@@ -2914,14 +2914,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-      const sqlClient = postgres(connectionUrl);
+      const sqlClient = postgres(connectionUrl, { ssl: 'require' });
       const MIN_CLICKS = 30;
       const ACOS_WINDOW = 10; // ±10% window for placements
 
       // Get ACOS targets for campaigns in this country
       const acosTargetsResult = await sqlClient`
         SELECT campaign_id, acos_target, campaign_name
-        FROM "ACOS_Target_Campaign"
+        FROM s_acos_target_campaign
         WHERE country = ${country as string}
       `;
       const acosTargetsMap = new Map(acosTargetsResult.map((r: any) => [r.campaign_id, { target: Number(r.acos_target), name: r.campaign_name }]));

@@ -106,6 +106,9 @@ export default function CampaignView() {
         campaignType
       });
       const response = await authFetch(`/api/campaign-placements?${params}`);
+      if (!response.ok) {
+        throw new Error(`${response.status}: ${await response.text()}`);
+      }
       return response.json();
     },
     refetchInterval: 3600000, // Auto-refresh every hour

@@ -4,11 +4,11 @@ import * as path from 'path';
 
 export async function createAcosTargetsTable(): Promise<void> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  const sql = postgres(connectionUrl);
+  const sql = postgres(connectionUrl, { ssl: 'require' });
   
   try {
     await sql`
-      CREATE TABLE IF NOT EXISTS "ACOS_Target_Campaign" (
+      CREATE TABLE IF NOT EXISTS s_acos_target_campaign (
         campaign_id TEXT PRIMARY KEY,
         country TEXT NOT NULL,
         campaign_name TEXT NOT NULL,
@@ -16,7 +16,7 @@ export async function createAcosTargetsTable(): Promise<void> {
         created_at TIMESTAMP DEFAULT NOW()
       )
     `;
-    console.log('ACOS_Target_Campaign table created/verified');
+    console.log('s_acos_target_campaign table created/verified');
   } finally {
     await sql.end();
   }
@@ -24,7 +24,7 @@ export async function createAcosTargetsTable(): Promise<void> {
 
 export async function importAcosTargetsFromCSV(): Promise<{ imported: number; skipped: number; errors: string[] }> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  const sql = postgres(connectionUrl);
+  const sql = postgres(connectionUrl, { ssl: 'require' });
   
   let imported = 0;
   let skipped = 0;
@@ -80,7 +80,7 @@ export async function importAcosTargetsFromCSV(): Promise<{ imported: number; sk
       for (let i = 0; i < batch.length; i++) {
         const r = batch[i];
         await sql`
-          INSERT INTO "ACOS_Target_Campaign" (campaign_id, country, campaign_name, acos_target)
+          INSERT INTO s_acos_target_campaign (campaign_id, country, campaign_name, acos_target)
           VALUES (${r.campaignId}, ${r.country}, ${r.campaignName}, ${r.acosTarget})
           ON CONFLICT (campaign_id) DO UPDATE SET
             country = EXCLUDED.country,
@@ -103,17 +103,20 @@ export async function importAcosTargetsFromCSV(): Promise<{ imported: number; sk
 
 export async function getAcosTargetForCampaign(campaignId: string): Promise<number | null> {
   const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
-  const sql = postgres(connectionUrl);
-  
+  const sql = postgres(connectionUrl, { ssl: 'require' });
+
   try {
     const result = await sql`
-      SELECT acos_target FROM "ACOS_Target_Campaign"
+      SELECT acos_target FROM s_acos_target_campaign
       WHERE campaign_id = ${campaignId}
     `;
-    
+
     if (result.length > 0) {
       return Number(result[0].acos_target);
     }
+    return null;
+  } catch (err) {
+    console.warn('Could not fetch ACOS target for campaign', campaignId, err);
     return null;
   } finally {
     await sql.end();
