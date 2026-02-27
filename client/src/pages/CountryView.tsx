@@ -9,7 +9,8 @@ import ACOSBadge from "@/components/ACOSBadge";
 import CurrencyBadge from "@/components/CurrencyBadge";
 import { AgentChat } from "@/components/AgentChat";
 import { Button } from "@/components/ui/button";
-import { Download, TrendingUp, LogOut } from "lucide-react";
+import { Download, TrendingUp, LogOut, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -27,6 +28,7 @@ export default function CountryView() {
   const { user, signOut } = useAuth();
   const countryCode = params?.code || "FR";
   const { campaignType } = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState("");
   const [dateRange, setDateRange] = useState<{ from: string; to: string }>(() => {
     const to = new Date();
     const from = subDays(to, 59);
@@ -234,28 +236,51 @@ export default function CountryView() {
               <h2 className="text-xl font-semibold">Campaigns</h2>
               <p className="text-sm text-muted-foreground">Click a campaign to view ad groups</p>
             </div>
-            <Button variant="outline" size="sm" className="gap-2" data-testid="button-recommendations">
-              <TrendingUp className="h-4 w-4" />
-              Generate Recommendations
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search campaigns..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 w-[250px]"
+                  data-testid="campaign-search-input"
+                />
+              </div>
+              <Button variant="outline" size="sm" className="gap-2" data-testid="button-recommendations">
+                <TrendingUp className="h-4 w-4" />
+                Generate Recommendations
+              </Button>
+            </div>
           </div>
           {campaignsLoading ? (
             <Skeleton className="h-64" />
           ) : campaigns ? (
-            <DataTable
-              columns={[
-                { key: "campaign", label: "Campaign", sortable: true },
-                { key: "clicks", label: "Clicks", align: "right", sortable: true },
-                { key: "cost", label: "Cost (€)", align: "right", sortable: true, render: (val) => val.toFixed(2) },
-                { key: "sales", label: "Sales (€)", align: "right", sortable: true, render: (val) => val.toFixed(2) },
-                { key: "orders", label: "Orders", align: "right", sortable: true },
-                { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
-              ]}
-              data={campaigns}
-              onRowClick={(row) => {
-                setLocation(`/campaign/${row.id}?country=${countryCode}&campaignType=${campaignType}`);
-              }}
-            />
+            <>
+              <DataTable
+                columns={[
+                  { key: "campaign", label: "Campaign", sortable: true },
+                  { key: "clicks", label: "Clicks", align: "right", sortable: true },
+                  { key: "cost", label: "Cost (€)", align: "right", sortable: true, render: (val) => val.toFixed(2) },
+                  { key: "sales", label: "Sales (€)", align: "right", sortable: true, render: (val) => val.toFixed(2) },
+                  { key: "orders", label: "Orders", align: "right", sortable: true },
+                  { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
+                ]}
+                data={campaigns.filter((c: any) =>
+                  c.campaign.toLowerCase().includes(searchQuery.toLowerCase())
+                )}
+                onRowClick={(row) => {
+                  setLocation(`/campaign/${row.id}?country=${countryCode}&campaignType=${campaignType}`);
+                }}
+              />
+              {searchQuery && campaigns.filter((c: any) =>
+                c.campaign.toLowerCase().includes(searchQuery.toLowerCase())
+              ).length === 0 && (
+                <p className="text-center text-sm text-muted-foreground py-4">
+                  No campaigns match "{searchQuery}"
+                </p>
+              )}
+            </>
           ) : null}
         </div>
       </main>

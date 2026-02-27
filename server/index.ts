@@ -104,7 +104,6 @@ app.use("/api", async (req: Request, res: Response, next: NextFunction) => {
   server.listen({
     port,
     host: "0.0.0.0",
-    reusePort: true,
   }, () => {
     log(`serving on port ${port}`);
     startScheduler();
