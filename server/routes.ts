@@ -336,90 +336,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Campaigns by country endpoint - combines brand + product
   app.get("/api/campaigns", async (req, res) => {
     try {
-      const { country, from, to, convertToEur: convertToEurParam = 'true' } = req.query;
+      const { country, from, to, convertToEur: convertToEurParam = 'true', campaignType = 'products' } = req.query;
       const convertToEur = convertToEurParam === 'true';
-      
-      // Query brand campaigns
-      const brandConditions = [];
-      if (country) brandConditions.push(eq(brandSearchTerms.country, country as string));
-      if (from) brandConditions.push(gte(brandSearchTerms.date, from as string));
-      if (to) brandConditions.push(lte(brandSearchTerms.date, to as string));
+      const isBrands = campaignType === 'brands';
 
-      const brandResults = await db
-        .select({
-          campaignId: brandSearchTerms.campaignId,
-          campaignName: sql<string>`MAX(${brandSearchTerms.campaignName})`,
-          clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
-          orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
-          currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
-        })
-        .from(brandSearchTerms)
-        .where(brandConditions.length > 0 ? and(...brandConditions) : undefined)
-        .groupBy(brandSearchTerms.campaignId);
+      let results: any[];
 
-      // Query product campaigns
-      const productConditions = [];
-      if (country) productConditions.push(eq(productSearchTerms.country, country as string));
-      if (from) productConditions.push(gte(productSearchTerms.date, from as string));
-      if (to) productConditions.push(lte(productSearchTerms.date, to as string));
+      if (isBrands) {
+        // Query brand campaigns only
+        const conditions = [];
+        if (country) conditions.push(eq(brandSearchTerms.country, country as string));
+        if (from) conditions.push(gte(brandSearchTerms.date, from as string));
+        if (to) conditions.push(lte(brandSearchTerms.date, to as string));
 
-      const productResults = await db
-        .select({
-          campaignId: productSearchTerms.campaignId,
-          campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
-          clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
-          cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
-          sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
-          orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
-          currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
-        })
-        .from(productSearchTerms)
-        .where(productConditions.length > 0 ? and(...productConditions) : undefined)
-        .groupBy(productSearchTerms.campaignId);
+        results = await db
+          .select({
+            campaignId: brandSearchTerms.campaignId,
+            campaignName: sql<string>`MAX(${brandSearchTerms.campaignName})`,
+            clicks: sql<number>`COALESCE(SUM(${brandSearchTerms.clicks}), 0)`,
+            cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
+            sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
+            orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+            currency: sql<string>`MAX(${brandSearchTerms.campaignBudgetCurrencyCode})`,
+          })
+          .from(brandSearchTerms)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .groupBy(brandSearchTerms.campaignId);
+      } else {
+        // Query product campaigns only
+        const conditions = [];
+        if (country) conditions.push(eq(productSearchTerms.country, country as string));
+        if (from) conditions.push(gte(productSearchTerms.date, from as string));
+        if (to) conditions.push(lte(productSearchTerms.date, to as string));
 
-      // Combine by campaign ID
-      const campaignMap = new Map();
-      
-      brandResults.forEach(row => {
-        if (row.campaignId) {
-          campaignMap.set(String(row.campaignId), {
-            id: row.campaignId,
-            campaign: row.campaignName,
-            clicks: Number(row.clicks),
-            cost: Number(row.cost),
-            sales: Number(row.sales),
-            orders: Number(row.orders),
-            currency: row.currency,
-          });
-        }
-      });
+        results = await db
+          .select({
+            campaignId: productSearchTerms.campaignId,
+            campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
+            clicks: sql<number>`COALESCE(SUM(${productSearchTerms.clicks}), 0)`,
+            cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
+            sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
+            orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
+            currency: sql<string>`MAX(${productSearchTerms.campaignBudgetCurrencyCode})`,
+          })
+          .from(productSearchTerms)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .groupBy(productSearchTerms.campaignId);
+      }
 
-      productResults.forEach(row => {
-        if (row.campaignId) {
-          const key = String(row.campaignId);
-          const existing = campaignMap.get(key);
-          if (existing) {
-            existing.clicks += Number(row.clicks);
-            existing.cost += Number(row.cost);
-            existing.sales += Number(row.sales);
-            existing.orders += Number(row.orders);
-          } else {
-            campaignMap.set(key, {
-              id: row.campaignId,
-              campaign: row.campaignName,
-              clicks: Number(row.clicks),
-              cost: Number(row.cost),
-              sales: Number(row.sales),
-              orders: Number(row.orders),
-              currency: row.currency,
-            });
-          }
-        }
-      });
-
-      const campaigns = Array.from(campaignMap.values())
+      const campaigns = results
+        .filter(row => row.campaignId)
+        .map(row => ({
+          id: row.campaignId,
+          campaign: row.campaignName,
+          clicks: Number(row.clicks),
+          cost: Number(row.cost),
+          sales: Number(row.sales),
+          orders: Number(row.orders),
+          currency: row.currency,
+        }))
         .map(row => ({
           ...row,
           acos: calculateACOS(row.cost, row.sales),
@@ -2569,34 +2544,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Main bidding strategy endpoint - analyze and generate recommendations
   app.get("/api/bidding-strategy", async (req, res) => {
     try {
-      const { country, campaignId } = req.query;
-      
+      const { country, campaignId, campaignType = 'products' } = req.query;
+
       if (!country) {
         return res.status(400).json({ error: 'Country parameter is required' });
       }
 
+      const isBrands = campaignType === 'brands';
       const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
       const sqlClient = postgres(connectionUrl, { ssl: 'require' });
 
       // Get weights for this country
       const weights = await getWeightsForCountry(country as string);
-      
+
       // Get campaign-specific ACOS targets
       const acosTargetsResult = await sqlClient`
-        SELECT campaign_id, acos_target, campaign_name 
-        FROM s_acos_target_campaign 
+        SELECT campaign_id, acos_target, campaign_name
+        FROM s_acos_target_campaign
         WHERE country = ${country as string}
       `;
       const acosTargetsMap = new Map(acosTargetsResult.map((r: any) => [r.campaign_id, { target: Number(r.acos_target), name: r.campaign_name }]));
 
       // Get last bid change dates for each keyword
-      const bidChangeResult = await sqlClient`
-        SELECT targeting, campaign_id, ad_group_id, MAX(date_adjusted) as last_change_date
-        FROM "bid_change_history"
-        WHERE country = ${country as string}
-        ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}` : sqlClient``}
-        GROUP BY targeting, campaign_id, ad_group_id
-      `;
+      const bidChangeResult = isBrands
+        ? await sqlClient`
+            SELECT targeting, campaign_id::text as campaign_id, ad_group_id::text as ad_group_id, MAX(synced_at) as last_change_date
+            FROM "s_keyword_bids"
+            WHERE campaign_type = 'SB' AND country = ${country as string}
+            ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}::bigint` : sqlClient``}
+            GROUP BY targeting, campaign_id, ad_group_id
+          `
+        : await sqlClient`
+            SELECT targeting, campaign_id, ad_group_id, MAX(date_adjusted) as last_change_date
+            FROM "bid_change_history"
+            WHERE country = ${country as string}
+            ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}` : sqlClient``}
+            GROUP BY targeting, campaign_id, ad_group_id
+          `;
       const lastChangeMap = new Map(bidChangeResult.map((r: any) => [`${r.campaign_id}-${r.targeting}`, r.last_change_date]));
 
       // Calculate date ranges
@@ -2611,104 +2595,203 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Fetch keyword performance data with all time windows INCLUDING T0
       // T0 = data since last bid change (or lifetime if no change)
-      const keywordData = await sqlClient`
-        WITH last_changes AS (
+      const keywordData = isBrands
+        ? await sqlClient`
+          WITH last_changes AS (
+            SELECT
+              targeting,
+              campaign_id::text as campaign_id,
+              ad_group_id::text as ad_group_id,
+              MAX(synced_at)::text as last_change_date
+            FROM "s_keyword_bids"
+            WHERE campaign_type = 'SB' AND country = ${country as string}
+            ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}::bigint` : sqlClient``}
+            GROUP BY targeting, campaign_id, ad_group_id
+          ),
+          campaign_last_changes AS (
+            SELECT campaign_id, MAX(change_date) as campaign_last_change_date
+            FROM (
+              SELECT campaign_id::text as campaign_id, synced_at as change_date
+              FROM "s_keyword_bids"
+              WHERE campaign_type = 'SB' AND country = ${country as string}
+              ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}::bigint` : sqlClient``}
+              UNION ALL
+              SELECT campaign_id, date_detected as change_date
+              FROM "s_history_bid_adjustments"
+              WHERE campaign_type = 'SB' AND country = ${country as string}
+              ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}` : sqlClient``}
+            ) combined
+            GROUP BY campaign_id
+          ),
+          keyword_base AS (
+            SELECT
+              s.campaign_id::text as campaign_id,
+              s.campaign_name as campaign_name,
+              s.ad_group_id::text as ad_group_id,
+              s.ad_group_name as ad_group_name,
+              s.keyword_text as targeting,
+              s.match_type as match_type,
+              CAST(s.keyword_bid AS NUMERIC) as keyword_bid,
+              s.date::text as date,
+              COALESCE(s.clicks, 0) as clicks,
+              COALESCE(s.cost, 0) as cost,
+              COALESCE(s.sales, 0) as sales,
+              COALESCE(s.purchases, 0) as orders,
+              lc.last_change_date::text as last_change_date,
+              clc.campaign_last_change_date::text as campaign_last_change_date
+            FROM "s_brand_search_terms" s
+            LEFT JOIN last_changes lc
+              ON s.campaign_id::text = lc.campaign_id::text
+              AND s.keyword_text = lc.targeting
+              AND s.ad_group_id::text = lc.ad_group_id::text
+            LEFT JOIN campaign_last_changes clc
+              ON s.campaign_id::text = clc.campaign_id
+            WHERE s.country = ${country as string}
+            ${campaignId ? sqlClient`AND s.campaign_id = ${campaignId as string}::bigint` : sqlClient``}
+          )
           SELECT
-            targeting,
             campaign_id,
+            campaign_name,
             ad_group_id,
-            MAX(date_adjusted) as last_change_date
-          FROM "bid_change_history"
-          WHERE country = ${country as string}
-          ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}` : sqlClient``}
-          GROUP BY targeting, campaign_id, ad_group_id
-        ),
-        campaign_last_changes AS (
-          SELECT campaign_id, MAX(change_date) as campaign_last_change_date
-          FROM (
-            SELECT campaign_id::text as campaign_id, snapshot_date as change_date
+            ad_group_name,
+            targeting,
+            match_type,
+            MAX(keyword_bid) as current_bid,
+            MAX(last_change_date) as last_change_date,
+            MAX(campaign_last_change_date) as campaign_last_change_date,
+
+            -- Lifetime metrics
+            SUM(clicks) as lifetime_clicks,
+            SUM(cost) as lifetime_cost,
+            SUM(sales) as lifetime_sales,
+            SUM(orders) as lifetime_orders,
+
+            -- 365D metrics
+            SUM(CASE WHEN date >= ${d365AgoStr} THEN clicks ELSE 0 END) as d365_clicks,
+            SUM(CASE WHEN date >= ${d365AgoStr} THEN cost ELSE 0 END) as d365_cost,
+            SUM(CASE WHEN date >= ${d365AgoStr} THEN sales ELSE 0 END) as d365_sales,
+
+            -- 30D metrics
+            SUM(CASE WHEN date >= ${d30AgoStr} THEN clicks ELSE 0 END) as d30_clicks,
+            SUM(CASE WHEN date >= ${d30AgoStr} THEN cost ELSE 0 END) as d30_cost,
+            SUM(CASE WHEN date >= ${d30AgoStr} THEN sales ELSE 0 END) as d30_sales,
+
+            -- T0 metrics (since last keyword bid change, or all data if no change)
+            SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN clicks ELSE 0 END) as t0_clicks,
+            SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN cost ELSE 0 END) as t0_cost,
+            SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN sales ELSE 0 END) as t0_sales,
+
+            -- Campaign T0 metrics (since last change of ANY kind in campaign)
+            SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN clicks ELSE 0 END) as campaign_t0_clicks,
+            SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN cost ELSE 0 END) as campaign_t0_cost,
+            SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN sales ELSE 0 END) as campaign_t0_sales,
+
+            MIN(date) as first_date,
+            MAX(date) as last_date
+          FROM keyword_base
+          GROUP BY campaign_id, campaign_name, ad_group_id, ad_group_name, targeting, match_type
+          HAVING SUM(clicks) >= 30
+          ORDER BY SUM(cost) DESC
+          LIMIT 500
+        `
+        : await sqlClient`
+          WITH last_changes AS (
+            SELECT
+              targeting,
+              campaign_id,
+              ad_group_id,
+              MAX(date_adjusted) as last_change_date
             FROM "bid_change_history"
             WHERE country = ${country as string}
-            ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}::bigint` : sqlClient``}
-            UNION ALL
-            SELECT campaign_id, date_detected as change_date
-            FROM "history_bid_adjustments"
-            WHERE country = ${country as string}
             ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}` : sqlClient``}
-          ) combined
-          GROUP BY campaign_id
-        ),
-        keyword_base AS (
+            GROUP BY targeting, campaign_id, ad_group_id
+          ),
+          campaign_last_changes AS (
+            SELECT campaign_id, MAX(change_date) as campaign_last_change_date
+            FROM (
+              SELECT campaign_id::text as campaign_id, snapshot_date as change_date
+              FROM "bid_change_history"
+              WHERE country = ${country as string}
+              ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}::bigint` : sqlClient``}
+              UNION ALL
+              SELECT campaign_id, date_detected as change_date
+              FROM "s_history_bid_adjustments"
+              WHERE country = ${country as string}
+              ${campaignId ? sqlClient`AND campaign_id = ${campaignId as string}` : sqlClient``}
+            ) combined
+            GROUP BY campaign_id
+          ),
+          keyword_base AS (
+            SELECT
+              s."campaignId" as campaign_id,
+              s."campaignName" as campaign_name,
+              s."adGroupId" as ad_group_id,
+              s."adGroupName" as ad_group_name,
+              s.keyword as targeting,
+              s."matchType" as match_type,
+              CAST(s."keywordBid" AS NUMERIC) as keyword_bid,
+              s.date::text as date,
+              COALESCE(s.clicks, 0) as clicks,
+              COALESCE(s.cost, 0) as cost,
+              COALESCE(CAST(s."sales30d" AS NUMERIC), 0) as sales,
+              COALESCE(CAST(s."purchases30d" AS NUMERIC), 0) as orders,
+              lc.last_change_date::text as last_change_date,
+              clc.campaign_last_change_date::text as campaign_last_change_date
+            FROM "s_products_search_terms" s
+            LEFT JOIN last_changes lc
+              ON s."campaignId"::text = lc.campaign_id::text
+              AND s.keyword = lc.targeting
+              AND s."adGroupId"::text = lc.ad_group_id::text
+            LEFT JOIN campaign_last_changes clc
+              ON s."campaignId"::text = clc.campaign_id
+            WHERE s.country = ${country as string}
+            ${campaignId ? sqlClient`AND s."campaignId" = ${campaignId as string}` : sqlClient``}
+          )
           SELECT
-            s."campaignId" as campaign_id,
-            s."campaignName" as campaign_name,
-            s."adGroupId" as ad_group_id,
-            s."adGroupName" as ad_group_name,
-            s.keyword as targeting,
-            s."matchType" as match_type,
-            CAST(s."keywordBid" AS NUMERIC) as keyword_bid,
-            s.date::text as date,
-            COALESCE(s.clicks, 0) as clicks,
-            COALESCE(s.cost, 0) as cost,
-            COALESCE(CAST(s."sales30d" AS NUMERIC), 0) as sales,
-            COALESCE(CAST(s."purchases30d" AS NUMERIC), 0) as orders,
-            lc.last_change_date::text as last_change_date,
-            clc.campaign_last_change_date::text as campaign_last_change_date
-          FROM "s_products_search_terms" s
-          LEFT JOIN last_changes lc
-            ON s."campaignId"::text = lc.campaign_id::text
-            AND s.keyword = lc.targeting
-            AND s."adGroupId"::text = lc.ad_group_id::text
-          LEFT JOIN campaign_last_changes clc
-            ON s."campaignId"::text = clc.campaign_id
-          WHERE s.country = ${country as string}
-          ${campaignId ? sqlClient`AND s."campaignId" = ${campaignId as string}` : sqlClient``}
-        )
-        SELECT
-          campaign_id,
-          campaign_name,
-          ad_group_id,
-          ad_group_name,
-          targeting,
-          match_type,
-          MAX(keyword_bid) as current_bid,
-          MAX(last_change_date) as last_change_date,
-          MAX(campaign_last_change_date) as campaign_last_change_date,
+            campaign_id,
+            campaign_name,
+            ad_group_id,
+            ad_group_name,
+            targeting,
+            match_type,
+            MAX(keyword_bid) as current_bid,
+            MAX(last_change_date) as last_change_date,
+            MAX(campaign_last_change_date) as campaign_last_change_date,
 
-          -- Lifetime metrics
-          SUM(clicks) as lifetime_clicks,
-          SUM(cost) as lifetime_cost,
-          SUM(sales) as lifetime_sales,
-          SUM(orders) as lifetime_orders,
+            -- Lifetime metrics
+            SUM(clicks) as lifetime_clicks,
+            SUM(cost) as lifetime_cost,
+            SUM(sales) as lifetime_sales,
+            SUM(orders) as lifetime_orders,
 
-          -- 365D metrics
-          SUM(CASE WHEN date >= ${d365AgoStr} THEN clicks ELSE 0 END) as d365_clicks,
-          SUM(CASE WHEN date >= ${d365AgoStr} THEN cost ELSE 0 END) as d365_cost,
-          SUM(CASE WHEN date >= ${d365AgoStr} THEN sales ELSE 0 END) as d365_sales,
+            -- 365D metrics
+            SUM(CASE WHEN date >= ${d365AgoStr} THEN clicks ELSE 0 END) as d365_clicks,
+            SUM(CASE WHEN date >= ${d365AgoStr} THEN cost ELSE 0 END) as d365_cost,
+            SUM(CASE WHEN date >= ${d365AgoStr} THEN sales ELSE 0 END) as d365_sales,
 
-          -- 30D metrics
-          SUM(CASE WHEN date >= ${d30AgoStr} THEN clicks ELSE 0 END) as d30_clicks,
-          SUM(CASE WHEN date >= ${d30AgoStr} THEN cost ELSE 0 END) as d30_cost,
-          SUM(CASE WHEN date >= ${d30AgoStr} THEN sales ELSE 0 END) as d30_sales,
+            -- 30D metrics
+            SUM(CASE WHEN date >= ${d30AgoStr} THEN clicks ELSE 0 END) as d30_clicks,
+            SUM(CASE WHEN date >= ${d30AgoStr} THEN cost ELSE 0 END) as d30_cost,
+            SUM(CASE WHEN date >= ${d30AgoStr} THEN sales ELSE 0 END) as d30_sales,
 
-          -- T0 metrics (since last keyword bid change, or all data if no change)
-          SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN clicks ELSE 0 END) as t0_clicks,
-          SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN cost ELSE 0 END) as t0_cost,
-          SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN sales ELSE 0 END) as t0_sales,
+            -- T0 metrics (since last keyword bid change, or all data if no change)
+            SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN clicks ELSE 0 END) as t0_clicks,
+            SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN cost ELSE 0 END) as t0_cost,
+            SUM(CASE WHEN last_change_date IS NULL OR date >= last_change_date THEN sales ELSE 0 END) as t0_sales,
 
-          -- Campaign T0 metrics (since last change of ANY kind in campaign)
-          SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN clicks ELSE 0 END) as campaign_t0_clicks,
-          SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN cost ELSE 0 END) as campaign_t0_cost,
-          SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN sales ELSE 0 END) as campaign_t0_sales,
+            -- Campaign T0 metrics (since last change of ANY kind in campaign)
+            SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN clicks ELSE 0 END) as campaign_t0_clicks,
+            SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN cost ELSE 0 END) as campaign_t0_cost,
+            SUM(CASE WHEN campaign_last_change_date IS NULL OR date >= campaign_last_change_date THEN sales ELSE 0 END) as campaign_t0_sales,
 
-          MIN(date) as first_date,
-          MAX(date) as last_date
-        FROM keyword_base
-        GROUP BY campaign_id, campaign_name, ad_group_id, ad_group_name, targeting, match_type
-        HAVING SUM(clicks) >= 30
-        ORDER BY SUM(cost) DESC
-        LIMIT 500
-      `;
+            MIN(date) as first_date,
+            MAX(date) as last_date
+          FROM keyword_base
+          GROUP BY campaign_id, campaign_name, ad_group_id, ad_group_name, targeting, match_type
+          HAVING SUM(clicks) >= 30
+          ORDER BY SUM(cost) DESC
+          LIMIT 500
+        `;
 
       const recommendations: any[] = [];
       const combinedActions: any[] = [];
@@ -3204,14 +3287,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Unified export with both keyword bids AND placement adjustments
   app.get("/api/exports/bid-recommendations.xlsx", async (req, res) => {
     try {
-      const { country, campaignId } = req.query;
-      
+      const { country, campaignId, campaignType = 'products' } = req.query;
+
       if (!country) {
         return res.status(400).json({ error: 'Country parameter is required' });
       }
 
       const countryStr = country as string;
       const campaignIdFilter = campaignId as string | undefined;
+      const campaignTypeStr = campaignType as string;
       const wb = XLSX.utils.book_new();
       
       // Get weights for this country
@@ -3247,9 +3331,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (keywordRecs.length === 0) {
         const host = req.get('host') || 'localhost:5000';
         const protocol = req.protocol || 'http';
-        const strategyUrl = campaignIdFilter 
-          ? `${protocol}://${host}/api/bidding-strategy?country=${countryStr}&campaignId=${campaignIdFilter}`
-          : `${protocol}://${host}/api/bidding-strategy?country=${countryStr}`;
+        const strategyUrl = campaignIdFilter
+          ? `${protocol}://${host}/api/bidding-strategy?country=${countryStr}&campaignId=${campaignIdFilter}&campaignType=${campaignTypeStr}`
+          : `${protocol}://${host}/api/bidding-strategy?country=${countryStr}&campaignType=${campaignTypeStr}`;
         
         const strategyResponse = await fetch(strategyUrl);
         if (strategyResponse.ok) {
@@ -3281,9 +3365,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (placementRecs.length === 0) {
         const host = req.get('host') || 'localhost:5000';
         const protocol = req.protocol || 'http';
-        const placementUrl = campaignIdFilter 
-          ? `${protocol}://${host}/api/placement-bidding-strategy?country=${countryStr}&campaignId=${campaignIdFilter}`
-          : `${protocol}://${host}/api/placement-bidding-strategy?country=${countryStr}`;
+        const placementUrl = campaignIdFilter
+          ? `${protocol}://${host}/api/placement-bidding-strategy?country=${countryStr}&campaignId=${campaignIdFilter}&campaignType=${campaignTypeStr}`
+          : `${protocol}://${host}/api/placement-bidding-strategy?country=${countryStr}&campaignType=${campaignTypeStr}`;
         
         const placementResponse = await fetch(placementUrl);
         if (placementResponse.ok) {
@@ -3765,8 +3849,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Export campaign placements to Excel
   app.get("/api/exports/campaign-placements.xlsx", async (req, res) => {
     try {
-      const { campaignId, country } = req.query;
-      
+      const { campaignId, country, campaignType = 'products' } = req.query;
+
       if (!campaignId) {
         return res.status(400).json({ error: 'campaignId parameter is required' });
       }
@@ -3774,7 +3858,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch placements using the same logic (use request host to avoid hardcoded localhost)
       const host = req.get('host') || 'localhost:5000';
       const protocol = req.protocol || 'http';
-      const placementsResponse = await fetch(`${protocol}://${host}/api/campaign-placements?campaignId=${campaignId}${country ? `&country=${country}` : ''}`);
+      const placementsResponse = await fetch(`${protocol}://${host}/api/campaign-placements?campaignId=${campaignId}&campaignType=${campaignType}${country ? `&country=${country}` : ''}`);
       const placementsData = await placementsResponse.json();
 
       const placements = placementsData.placements || [];
