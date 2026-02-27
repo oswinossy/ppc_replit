@@ -174,8 +174,7 @@ export default function CampaignView() {
 
   const handleExportRecommendations = async () => {
     const params = new URLSearchParams({
-      campaignId,
-      campaignType
+      campaignId
     });
     if (countryCode) {
       params.append('country', countryCode);
@@ -445,7 +444,7 @@ export default function CampaignView() {
                   variant="outline" 
                   size="sm"
                   onClick={() => {
-                    const url = `/api/exports/campaign-placements.xlsx?campaignId=${campaignId}&campaignType=${campaignType}${countryCode ? `&country=${countryCode}` : ''}`;
+                    const url = `/api/exports/campaign-placements.xlsx?campaignId=${campaignId}${countryCode ? `&country=${countryCode}` : ''}`;
                     const a = document.createElement("a");
                     a.href = url;
                     a.click();
