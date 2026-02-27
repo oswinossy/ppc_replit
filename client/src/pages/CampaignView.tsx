@@ -179,9 +179,6 @@ export default function CampaignView() {
     if (countryCode) {
       params.append('country', countryCode);
     }
-    if (campaignType) {
-      params.append('campaignType', campaignType);
-    }
     const response = await authFetch(`/api/exports/bid-recommendations.xlsx?${params}`);
     if (!response.ok) {
       alert('Export failed. Please try again.');

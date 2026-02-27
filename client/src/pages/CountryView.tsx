@@ -110,8 +110,7 @@ export default function CountryView() {
 
   const handleExportRecommendations = async () => {
     const params = new URLSearchParams({
-      country: countryCode,
-      campaignType
+      country: countryCode
     });
     const response = await authFetch(`/api/exports/bid-recommendations.xlsx?${params}`);
     if (!response.ok) {
