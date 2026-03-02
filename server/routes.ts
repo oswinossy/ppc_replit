@@ -510,7 +510,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           currency: row.currency,
           acos: calculateACOS(Number(row.cost), Number(row.sales)),
         }))
-        .sort((a, b) => b.sales - a.sales);
+        .sort((a, b) => a.adGroup.localeCompare(b.adGroup));
 
       res.json(adGroups);
     } catch (error) {
