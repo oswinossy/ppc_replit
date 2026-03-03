@@ -786,7 +786,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (campaignType === 'brands') {
           const conditions = ['1=1'];
           const params: any[] = [];
-          if (campaignId) { conditions.push(`campaign_id::text = $${params.length + 1}`); params.push(campaignId); }
+          if (campaignId) { conditions.push(`campaign_id = $${params.length + 1}::bigint`); params.push(campaignId); }
           if (country) { conditions.push(`country = $${params.length + 1}`); params.push(country); }
           if (from) { conditions.push(`date >= $${params.length + 1}::date`); params.push(from); }
           if (to) { conditions.push(`date <= $${params.length + 1}::date`); params.push(to); }
@@ -825,7 +825,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Product placements - use raw SQL with correct column names
           const conditions = ['1=1'];
           const params: any[] = [];
-          if (campaignId) { conditions.push(`campaign_id::text = $${params.length + 1}`); params.push(campaignId); }
+          if (campaignId) { conditions.push(`campaign_id = $${params.length + 1}::bigint`); params.push(campaignId); }
           if (country) { conditions.push(`country = $${params.length + 1}`); params.push(country); }
           if (from) { conditions.push(`date >= $${params.length + 1}::date`); params.push(from); }
           if (to) { conditions.push(`date <= $${params.length + 1}::date`); params.push(to); }
@@ -908,7 +908,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           const conditions = ['1=1'];
           const params: any[] = [];
-          if (campaignId) { conditions.push(`campaign_id::text = $${params.length + 1}`); params.push(campaignId); }
+          if (campaignId) { conditions.push(`campaign_id = $${params.length + 1}::bigint`); params.push(campaignId); }
           if (from) { conditions.push(`date >= $${params.length + 1}::date`); params.push(from); }
           if (to) { conditions.push(`date <= $${params.length + 1}::date`); params.push(to); }
 
@@ -945,7 +945,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           const conditions = ['1=1'];
           const params: any[] = [];
-          if (campaignId) { conditions.push(`campaign_id::text = $${params.length + 1}`); params.push(campaignId); }
+          if (campaignId) { conditions.push(`campaign_id = $${params.length + 1}::bigint`); params.push(campaignId); }
           if (from) { conditions.push(`date >= $${params.length + 1}::date`); params.push(from); }
           if (to) { conditions.push(`date <= $${params.length + 1}::date`); params.push(to); }
 
