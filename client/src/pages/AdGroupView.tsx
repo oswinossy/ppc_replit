@@ -208,12 +208,12 @@ export default function AdGroupView() {
   };
 
   const kpiCards = (kpis && !kpis.error) ? [
-    { label: "Cost", value: kpis.cost?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0', currency: kpis.currency === 'EUR' ? '€' : kpis.currency },
     { label: "Ad Sales", value: kpis.adSales?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0', currency: kpis.currency === 'EUR' ? '€' : kpis.currency },
     { label: "ACOS", value: `${kpis.acos?.toFixed(1) || '0'}%` },
     { label: "CPC", value: kpis.cpc?.toFixed(2) || '0', currency: kpis.currency === 'EUR' ? '€' : kpis.currency },
+    { label: "Cost", value: kpis.cost?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0', currency: kpis.currency === 'EUR' ? '€' : kpis.currency },
     { label: "CVR", value: `${((kpis.orders / kpis.clicks) * 100 || 0).toFixed(1)}%` },
-    { label: "RPO", value: (kpis.orders > 0 ? (kpis.adSales / kpis.orders) : 0).toFixed(2) || '0', currency: kpis.currency === 'EUR' ? '€' : kpis.currency },
+    { label: "Orders", value: kpis.orders?.toLocaleString() || '0' },
   ] : [];
 
   return (
