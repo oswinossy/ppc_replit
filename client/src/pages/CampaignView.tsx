@@ -345,12 +345,12 @@ export default function CampaignView() {
                 </div>
               </CardHeader>
               <CardContent className="pb-4">
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-6 gap-4">
                   <div className="text-center p-3 rounded-lg bg-muted/50">
                     <div className="text-xl font-bold">
-                      {campaignT0.t0_acos != null ? `${campaignT0.t0_acos.toFixed(1)}%` : '--'}
+                      {(kpis?.currency === 'EUR' ? '\u20AC' : kpis?.currency || '\u20AC')}{campaignT0.t0_cost?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0'}
                     </div>
-                    <div className="text-xs text-muted-foreground">T0 ACOS</div>
+                    <div className="text-xs text-muted-foreground">T0 Cost</div>
                   </div>
                   <div className="text-center p-3 rounded-lg bg-muted/50">
                     <div className="text-xl font-bold">
@@ -360,15 +360,27 @@ export default function CampaignView() {
                   </div>
                   <div className="text-center p-3 rounded-lg bg-muted/50">
                     <div className="text-xl font-bold">
-                      {(kpis?.currency === 'EUR' ? '\u20AC' : kpis?.currency || '\u20AC')}{campaignT0.t0_cost?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0'}
+                      {campaignT0.t0_acos != null ? `${campaignT0.t0_acos.toFixed(1)}%` : '--'}
                     </div>
-                    <div className="text-xs text-muted-foreground">T0 Cost</div>
+                    <div className="text-xs text-muted-foreground">T0 ACOS</div>
                   </div>
                   <div className="text-center p-3 rounded-lg bg-muted/50">
                     <div className="text-xl font-bold">
-                      {campaignT0.t0_roas != null ? campaignT0.t0_roas.toFixed(2) : '--'}
+                      {(kpis?.currency === 'EUR' ? '\u20AC' : kpis?.currency || '\u20AC')}{campaignT0.t0_cpc != null ? campaignT0.t0_cpc.toFixed(2) : '--'}
                     </div>
-                    <div className="text-xs text-muted-foreground">T0 ROAS</div>
+                    <div className="text-xs text-muted-foreground">T0 CPC</div>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className="text-xl font-bold">
+                      {campaignT0.t0_clicks > 0 ? `${((campaignT0.t0_orders / campaignT0.t0_clicks) * 100).toFixed(1)}%` : '--'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">T0 CVR</div>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className="text-xl font-bold">
+                      {(kpis?.currency === 'EUR' ? '\u20AC' : kpis?.currency || '\u20AC')}{campaignT0.t0_orders > 0 ? (campaignT0.t0_sales / campaignT0.t0_orders).toFixed(2) : '--'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">T0 RPO</div>
                   </div>
                 </div>
               </CardContent>
