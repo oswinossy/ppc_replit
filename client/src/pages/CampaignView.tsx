@@ -18,14 +18,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Link } from "wouter";
 import { useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { format, subDays } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { authFetch } from "@/lib/queryClient";
 import { useSearchParams } from "@/hooks/useSearchParams";
-
-type ViewMode = 'search-terms' | 'placements';
 
 export default function CampaignView() {
   const [, params] = useRoute("/campaign/:id");
@@ -37,8 +35,6 @@ export default function CampaignView() {
   const searchParams = useSearchParams();
   const countryCode = searchParams.country;
   const campaignType = searchParams.campaignType;
-  const initialView = searchParams.get('view') as ViewMode;
-  
   // Get display name for campaign type
   const campaignTypeLabel = campaignType === 'brands' ? 'Sponsored Brands' : 
                             campaignType === 'display' ? 'Display' : 'Sponsored Products';
@@ -51,15 +47,6 @@ export default function CampaignView() {
       to: format(to, 'yyyy-MM-dd'),
     };
   });
-  const [viewMode, setViewMode] = useState<ViewMode>(initialView === 'placements' ? 'placements' : 'search-terms');
-  
-  // Auto-switch to placements view if URL has view=placements
-  useEffect(() => {
-    if (initialView === 'placements' && viewMode !== 'placements') {
-      setViewMode('placements');
-    }
-  }, [initialView]);
-
   const { data: kpis, isLoading: kpisLoading } = useQuery({
     queryKey: ['/api/kpis', campaignId, countryCode, campaignType, dateRange],
     queryFn: async () => {
@@ -97,7 +84,6 @@ export default function CampaignView() {
 
   const { data: placements, isLoading: placementsLoading } = useQuery({
     queryKey: ['/api/campaign-placements', campaignId, campaignType, dateRange],
-    enabled: viewMode === 'placements',
     queryFn: async () => {
       const params = new URLSearchParams({ 
         campaignId,
@@ -272,29 +258,6 @@ export default function CampaignView() {
         </div>
       </div>
 
-      <div className="border-b bg-background">
-        <div className="flex items-center justify-end px-6 py-3">
-          <div className="flex items-center gap-2">
-            <Badge 
-              variant={viewMode === 'search-terms' ? 'default' : 'outline'}
-              className="cursor-pointer hover-elevate active-elevate-2"
-              onClick={() => setViewMode('search-terms')}
-              data-testid="badge-view-search-terms"
-            >
-              Search Terms
-            </Badge>
-            <Badge 
-              variant={viewMode === 'placements' ? 'default' : 'outline'}
-              className="cursor-pointer hover-elevate active-elevate-2"
-              onClick={() => setViewMode('placements')}
-              data-testid="badge-view-placements"
-            >
-              Placements
-            </Badge>
-          </div>
-        </div>
-      </div>
-
       <main className="max-w-[1600px] mx-auto px-6 py-8 space-y-8">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {kpisLoading ? (
@@ -394,134 +357,134 @@ export default function CampaignView() {
           <PerformanceChart data={chartData} currency={kpis?.currency === 'EUR' ? '€' : kpis?.currency || '€'} />
         ) : null}
 
-        {viewMode === 'search-terms' ? (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">Ad Groups</h2>
-                <p className="text-sm text-muted-foreground">Click an ad group to view search terms</p>
-              </div>
-              <Button variant="outline" size="sm" className="gap-2" data-testid="button-recommendations">
-                <TrendingUp className="h-4 w-4" />
-                Generate Recommendations
+        {/* Placements Table */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-xl font-semibold">Placements</h2>
+              <p className="text-sm text-muted-foreground">Campaign-level placement performance and bid adjustments</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {placements?.hasKeywordRecs && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link href={`/bidding-strategy?country=${countryCode || ''}`}>
+                      <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 cursor-pointer hover-elevate">
+                        <Target className="h-3 w-3 mr-1" />
+                        {placements.keywordRecCount} Keyword Adjustments
+                      </Badge>
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>This campaign also has {placements.keywordRecCount} keyword bid recommendations.</p>
+                    <p className="text-muted-foreground text-xs mt-1">Click to view Bidding Strategy</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const url = `/api/exports/campaign-placements.xlsx?campaignId=${campaignId}${countryCode ? `&country=${countryCode}` : ''}`;
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.click();
+                }}
+                disabled={!placements?.placements?.length}
+                data-testid="button-export-placements"
+              >
+                <Download className="h-4 w-4 mr-1" />
+                Export
               </Button>
             </div>
-            {adGroupsLoading ? (
-              <Skeleton className="h-64" />
-            ) : adGroups ? (
-              <DataTable
-                columns={[
-                  { key: "adGroup", label: "Ad Group", sortable: true },
-                  { key: "clicks", label: "Clicks", align: "right", sortable: true },
-                  { key: "cost", label: "Cost (€)", align: "right", sortable: true, render: (val) => val.toFixed(2) },
-                  { key: "sales", label: "Sales (€)", align: "right", sortable: true, render: (val) => val.toFixed(2) },
-                  { key: "orders", label: "Orders", align: "right", sortable: true },
-                  { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
-                ]}
-                data={adGroups}
-                onRowClick={(row) => {
-                  const url = countryCode 
-                    ? `/ad-group/${row.id}?country=${countryCode}&campaignType=${campaignType}&campaignId=${campaignId}`
-                    : `/ad-group/${row.id}?campaignType=${campaignType}&campaignId=${campaignId}`;
-                  setLocation(url);
-                }}
-              />
-            ) : null}
           </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <h2 className="text-xl font-semibold">Placements</h2>
-                <p className="text-sm text-muted-foreground">Campaign-level placement performance and bid adjustments</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {placements?.hasKeywordRecs && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Link href={`/bidding-strategy?country=${countryCode || ''}`}>
-                        <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 cursor-pointer hover-elevate">
-                          <Target className="h-3 w-3 mr-1" />
-                          {placements.keywordRecCount} Keyword Adjustments
-                        </Badge>
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>This campaign also has {placements.keywordRecCount} keyword bid recommendations.</p>
-                      <p className="text-muted-foreground text-xs mt-1">Click to view Bidding Strategy</p>
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => {
-                    const url = `/api/exports/campaign-placements.xlsx?campaignId=${campaignId}${countryCode ? `&country=${countryCode}` : ''}`;
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.click();
-                  }}
-                  disabled={!placements?.placements?.length}
-                  data-testid="button-export-placements"
-                >
-                  <Download className="h-4 w-4 mr-1" />
-                  Export
-                </Button>
-              </div>
-            </div>
-            {placementsLoading ? (
-              <Skeleton className="h-64" />
-            ) : placements?.placements?.length > 0 ? (
-              <DataTable
-                columns={[
-                  { key: "placement", label: "Placement", sortable: true },
-                  { key: "biddingStrategy", label: "Campaign Bidding Strategy", sortable: true },
-                  { key: "bidAdjustment", label: "Bid Adjustment", align: "right", sortable: true, render: (val) => {
-                    if (val === null || val === undefined) return '-';
-                    const adjustment = Number(val);
-                    return `${adjustment}%`;
-                  }},
-                  { key: "impressions", label: "Impressions", align: "right", sortable: true, render: (val) => Number(val ?? 0).toLocaleString() },
-                  { key: "clicks", label: "Clicks", align: "right", sortable: true, render: (val) => Number(val ?? 0).toLocaleString() },
-                  { key: "ctr", label: "CTR", align: "right", sortable: true, render: (val) => `${Number(val ?? 0).toFixed(2)}%` },
-                  { key: "spend", label: "Spend", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
-                  { key: "cpc", label: "CPC", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
-                  { key: "orders", label: "Orders", align: "right", sortable: true },
-                  { key: "sales", label: "Sales", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
-                  { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
-                  { 
-                    key: "targetBidAdjustment", 
-                    label: "Target Bid Adjustment", 
-                    align: "right", 
-                    sortable: true,
-                    cellClassName: (val, row) => {
-                      if (val === null || val === undefined) return "text-muted-foreground";
-                      const target = Number(val);
-                      const current = Number(row?.bidAdjustment ?? 0);
-                      if (target === current) return "text-muted-foreground";
-                      if (target > current) return "font-semibold text-green-600 dark:text-green-400";
-                      return "font-semibold text-red-600 dark:text-red-400";
-                    },
-                    render: (val) => {
-                      if (val === null || val === undefined) return "-";
-                      return `${val}%`;
-                    }
+          {placementsLoading ? (
+            <Skeleton className="h-64" />
+          ) : placements?.placements?.length > 0 ? (
+            <DataTable
+              columns={[
+                { key: "placement", label: "Placement", sortable: true },
+                { key: "biddingStrategy", label: "Campaign Bidding Strategy", sortable: true },
+                { key: "bidAdjustment", label: "Bid Adjustment", align: "right", sortable: true, render: (val) => {
+                  if (val === null || val === undefined) return '-';
+                  const adjustment = Number(val);
+                  return `${adjustment}%`;
+                }},
+                { key: "impressions", label: "Impressions", align: "right", sortable: true, render: (val) => Number(val ?? 0).toLocaleString() },
+                { key: "clicks", label: "Clicks", align: "right", sortable: true, render: (val) => Number(val ?? 0).toLocaleString() },
+                { key: "ctr", label: "CTR", align: "right", sortable: true, render: (val) => `${Number(val ?? 0).toFixed(2)}%` },
+                { key: "spend", label: "Spend", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
+                { key: "cpc", label: "CPC", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
+                { key: "orders", label: "Orders", align: "right", sortable: true },
+                { key: "sales", label: "Sales", align: "right", sortable: true, render: (val) => `€${Number(val ?? 0).toFixed(2)}` },
+                { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
+                {
+                  key: "targetBidAdjustment",
+                  label: "Target Bid Adjustment",
+                  align: "right",
+                  sortable: true,
+                  cellClassName: (val, row) => {
+                    if (val === null || val === undefined) return "text-muted-foreground";
+                    const target = Number(val);
+                    const current = Number(row?.bidAdjustment ?? 0);
+                    if (target === current) return "text-muted-foreground";
+                    if (target > current) return "font-semibold text-green-600 dark:text-green-400";
+                    return "font-semibold text-red-600 dark:text-red-400";
                   },
-                ]}
-                data={placements.placements}
-              />
-            ) : (
-              <div className="border rounded-lg py-12 text-center text-muted-foreground">
-                <Info className="h-8 w-8 mx-auto mb-3" />
-                <p className="font-medium">No placement data available</p>
-                <p className="text-sm mt-1">
-                  No placement data was found for this campaign in the selected date range.
-                  Try selecting a different time period.
-                </p>
-              </div>
-            )}
+                  render: (val) => {
+                    if (val === null || val === undefined) return "-";
+                    return `${val}%`;
+                  }
+                },
+              ]}
+              data={placements.placements}
+            />
+          ) : (
+            <div className="border rounded-lg py-12 text-center text-muted-foreground">
+              <Info className="h-8 w-8 mx-auto mb-3" />
+              <p className="font-medium">No placement data available</p>
+              <p className="text-sm mt-1">
+                No placement data was found for this campaign in the selected date range.
+                Try selecting a different time period.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Ad Groups Table */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold">Ad Groups</h2>
+              <p className="text-sm text-muted-foreground">Click an ad group to view search terms</p>
+            </div>
+            <Button variant="outline" size="sm" className="gap-2" data-testid="button-recommendations">
+              <TrendingUp className="h-4 w-4" />
+              Generate Recommendations
+            </Button>
           </div>
-        )}
+          {adGroupsLoading ? (
+            <Skeleton className="h-64" />
+          ) : adGroups ? (
+            <DataTable
+              columns={[
+                { key: "adGroup", label: "Ad Group", sortable: true },
+                { key: "clicks", label: "Clicks", align: "right", sortable: true },
+                { key: "cost", label: "Cost (€)", align: "right", sortable: true, render: (val) => val.toFixed(2) },
+                { key: "sales", label: "Sales (€)", align: "right", sortable: true, render: (val) => val.toFixed(2) },
+                { key: "orders", label: "Orders", align: "right", sortable: true },
+                { key: "acos", label: "ACOS", align: "right", sortable: true, render: (val) => <ACOSBadge value={val} /> },
+              ]}
+              data={adGroups}
+              onRowClick={(row) => {
+                const url = countryCode
+                  ? `/ad-group/${row.id}?country=${countryCode}&campaignType=${campaignType}&campaignId=${campaignId}`
+                  : `/ad-group/${row.id}?campaignType=${campaignType}&campaignId=${campaignId}`;
+                setLocation(url);
+              }}
+            />
+          ) : null}
+        </div>
       </main>
     </div>
   );
