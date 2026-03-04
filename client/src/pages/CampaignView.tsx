@@ -378,38 +378,6 @@ export default function CampaignView() {
           <PerformanceChart data={chartData} currency={kpis?.currency === 'EUR' ? '€' : kpis?.currency || '€'} />
         ) : null}
 
-        {/* Audience Segments Table */}
-        <div className="space-y-4">
-          <div>
-            <h2 className="text-xl font-semibold">Audience Segments</h2>
-            <p className="text-sm text-muted-foreground">Campaign-level audience performance by segment</p>
-          </div>
-          {audiencesLoading ? (
-            <Skeleton className="h-48" />
-          ) : audiences && audiences.length > 0 ? (
-            <DataTable
-              columns={[
-                { key: "segmentName", label: "Audience Segment Name", sortable: true },
-                { key: "cost", label: "Cost", align: "right" as const, sortable: true, render: (val: number) => `€${Number(val ?? 0).toFixed(2)}` },
-                { key: "sales", label: "Sales", align: "right" as const, sortable: true, render: (val: number) => `€${Number(val ?? 0).toFixed(2)}` },
-                { key: "acos", label: "ACOS", align: "right" as const, sortable: true, render: (val: number) => <ACOSBadge value={val} /> },
-                { key: "cpc", label: "CPC", align: "right" as const, sortable: true, render: (val: number) => `€${Number(val ?? 0).toFixed(2)}` },
-                { key: "cvr", label: "CVR", align: "right" as const, sortable: true, render: (val: number) => `${Number(val ?? 0).toFixed(1)}%` },
-                { key: "rpo", label: "RPO", align: "right" as const, sortable: true, render: (val: number) => `€${Number(val ?? 0).toFixed(2)}` },
-              ]}
-              data={audiences}
-            />
-          ) : (
-            <div className="border rounded-lg py-12 text-center text-muted-foreground">
-              <Info className="h-8 w-8 mx-auto mb-3" />
-              <p className="font-medium">No audience segment data available</p>
-              <p className="text-sm mt-1">
-                No audience data was found for this campaign in the selected date range.
-              </p>
-            </div>
-          )}
-        </div>
-
         {/* Placements Table */}
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-2">
@@ -499,6 +467,38 @@ export default function CampaignView() {
               <p className="text-sm mt-1">
                 No placement data was found for this campaign in the selected date range.
                 Try selecting a different time period.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Audience Segments Table */}
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold">Audience Segments</h2>
+            <p className="text-sm text-muted-foreground">Campaign-level audience performance by segment</p>
+          </div>
+          {audiencesLoading ? (
+            <Skeleton className="h-48" />
+          ) : audiences && audiences.length > 0 ? (
+            <DataTable
+              columns={[
+                { key: "segmentName", label: "Audience Segment Name", sortable: true },
+                { key: "cost", label: "Cost", align: "right" as const, sortable: true, render: (val: number) => `€${Number(val ?? 0).toFixed(2)}` },
+                { key: "sales", label: "Sales", align: "right" as const, sortable: true, render: (val: number) => `€${Number(val ?? 0).toFixed(2)}` },
+                { key: "acos", label: "ACOS", align: "right" as const, sortable: true, render: (val: number) => <ACOSBadge value={val} /> },
+                { key: "cpc", label: "CPC", align: "right" as const, sortable: true, render: (val: number) => `€${Number(val ?? 0).toFixed(2)}` },
+                { key: "cvr", label: "CVR", align: "right" as const, sortable: true, render: (val: number) => `${Number(val ?? 0).toFixed(1)}%` },
+                { key: "rpo", label: "RPO", align: "right" as const, sortable: true, render: (val: number) => `€${Number(val ?? 0).toFixed(2)}` },
+              ]}
+              data={audiences}
+            />
+          ) : (
+            <div className="border rounded-lg py-12 text-center text-muted-foreground">
+              <Info className="h-8 w-8 mx-auto mb-3" />
+              <p className="font-medium">No audience segment data available</p>
+              <p className="text-sm mt-1">
+                No audience data was found for this campaign in the selected date range.
               </p>
             </div>
           )}
