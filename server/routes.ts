@@ -865,6 +865,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Audience segments endpoint - aggregates s_audience_bid_adjustment by segment_name
+  app.get("/api/audiences", async (req, res) => {
+    try {
+      const { campaignId, campaignType = 'products', country, from, to } = req.query;
+
+      if (!campaignId) {
+        return res.status(400).json({ error: 'Campaign ID is required' });
+      }
+
+      const dbCampaignType = campaignType === 'brands' ? 'SB' : 'SP';
+      const salesCol = dbCampaignType === 'SB' ? 'sales_14d' : 'sales_7d';
+      const purchasesCol = dbCampaignType === 'SB' ? 'purchases_14d' : 'purchases_7d';
+
+      const connectionUrl = (process.env.DATABASE_URL || '').replace(/[\r\n\t]/g, '').trim().replace(/\s+/g, '');
+      const sqlClient = postgres(connectionUrl, { ssl: 'require' });
+
+      try {
+        const conditions = ['campaign_type = $1', 'campaign_id = $2'];
+        const params: any[] = [dbCampaignType, campaignId];
+
+        if (country) {
+          conditions.push(`country = $${params.length + 1}`);
+          params.push(country);
+        }
+        if (from) {
+          conditions.push(`report_start_date >= $${params.length + 1}::date`);
+          params.push(from);
+        }
+        if (to) {
+          conditions.push(`report_start_date <= $${params.length + 1}::date`);
+          params.push(to);
+        }
+
+        const results = await sqlClient.unsafe(`
+          SELECT
+            segment_name,
+            COALESCE(SUM(clicks), 0) as clicks,
+            COALESCE(SUM(cost), 0) as cost,
+            COALESCE(SUM(${salesCol}), 0) as sales,
+            COALESCE(SUM(${purchasesCol}), 0) as purchases,
+            COALESCE(SUM(impressions), 0) as impressions
+          FROM s_audience_bid_adjustment
+          WHERE ${conditions.join(' AND ')}
+          GROUP BY segment_name
+        `, params);
+
+        const audiences = results
+          .filter((row: any) => row.segment_name)
+          .map((row: any) => {
+            const clicks = Number(row.clicks);
+            const cost = Number(row.cost);
+            const sales = Number(row.sales);
+            const purchases = Number(row.purchases);
+            return {
+              segmentName: row.segment_name,
+              cost,
+              sales,
+              acos: calculateACOS(cost, sales),
+              cpc: calculateCPC(cost, clicks),
+              cvr: calculateCVR(purchases, clicks),
+              rpo: purchases > 0 ? sales / purchases : 0,
+            };
+          })
+          .sort((a: any, b: any) => b.sales - a.sales);
+
+        res.json(audiences);
+      } finally {
+        await sqlClient.end();
+      }
+    } catch (error: any) {
+      console.error('Audiences error:', error);
+      res.status(500).json({ error: 'Failed to fetch audience segments' });
+    }
+  });
+
   // Campaign-level placements endpoint - aggregates across all ad groups
   // Uses raw SQL because actual DB column names (snake_case) differ from Drizzle schema (camelCase)
   app.get("/api/campaign-placements", async (req, res) => {
