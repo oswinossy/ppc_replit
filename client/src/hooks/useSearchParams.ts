@@ -15,7 +15,6 @@ export function useSearchParams() {
       country: searchParams.get('country'),
       campaignType: (searchParams.get('campaignType') as 'products' | 'brands' | 'display') || 'products',
       campaignId: searchParams.get('campaignId'),
-      campaignName: searchParams.get('campaignName'),
       get: (key: string) => searchParams.get(key),
       toString: () => searchParams.toString(),
     };

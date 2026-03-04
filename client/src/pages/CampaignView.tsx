@@ -35,9 +35,8 @@ export default function CampaignView() {
   const searchParams = useSearchParams();
   const countryCode = searchParams.country;
   const campaignType = searchParams.campaignType;
-  const campaignName = searchParams.get('campaignName');
   // Get display name for campaign type
-  const campaignTypeLabel = campaignType === 'brands' ? 'Sponsored Brands' :
+  const campaignTypeLabel = campaignType === 'brands' ? 'Sponsored Brands' : 
                             campaignType === 'display' ? 'Display' : 'Sponsored Products';
   
   const [dateRange, setDateRange] = useState<{ from: string; to: string }>(() => {
@@ -200,7 +199,7 @@ export default function CampaignView() {
             <BreadcrumbNav items={[
               { label: "Dashboard", href: `/?campaignType=${campaignType}` },
               { label: countryCode || "", href: countryCode ? `/country/${countryCode}?campaignType=${campaignType}` : undefined },
-              { label: campaignName ? `${campaignName} (${campaignTypeLabel})` : `Campaign (${campaignTypeLabel})` }
+              { label: `Campaign (${campaignTypeLabel})` }
             ].filter(item => item.label)} />
             <CurrencyBadge countryCode={countryCode} />
           </div>
@@ -260,9 +259,6 @@ export default function CampaignView() {
       </div>
 
       <main className="max-w-[1600px] mx-auto px-6 py-8 space-y-8">
-        {campaignName && (
-          <h2 className="text-xl font-semibold">{campaignName}</h2>
-        )}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {kpisLoading ? (
             Array.from({ length: 6 }).map((_, i) => (
@@ -482,8 +478,8 @@ export default function CampaignView() {
               data={adGroups}
               onRowClick={(row) => {
                 const url = countryCode
-                  ? `/ad-group/${row.id}?country=${countryCode}&campaignType=${campaignType}&campaignId=${campaignId}&campaignName=${encodeURIComponent(campaignName || '')}`
-                  : `/ad-group/${row.id}?campaignType=${campaignType}&campaignId=${campaignId}&campaignName=${encodeURIComponent(campaignName || '')}`;
+                  ? `/ad-group/${row.id}?country=${countryCode}&campaignType=${campaignType}&campaignId=${campaignId}`
+                  : `/ad-group/${row.id}?campaignType=${campaignType}&campaignId=${campaignId}`;
                 setLocation(url);
               }}
             />
