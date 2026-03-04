@@ -29,7 +29,7 @@ export default function AdGroupView() {
   const adGroupId = params?.id || "";
   
   // Extract country, campaignType, and campaignId from query parameters
-  const { country: countryCode, campaignType, campaignId } = useSearchParams();
+  const { country: countryCode, campaignType, campaignId, campaignName } = useSearchParams();
   
   const [dateRange, setDateRange] = useState<{ from: string; to: string }>(() => {
     const to = new Date();
@@ -285,6 +285,9 @@ export default function AdGroupView() {
       </div>
 
       <main className="max-w-[1600px] mx-auto px-6 py-8 space-y-8">
+        {campaignName && (
+          <h2 className="text-xl font-semibold">{campaignName}</h2>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {kpisLoading ? (
             Array.from({ length: 6 }).map((_, i) => (
