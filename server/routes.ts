@@ -1051,12 +1051,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         exchangeRatesMap = await getExchangeRatesForRange(minDate, maxDate);
       }
 
-      // Group and aggregate data in memory
+      // Group and aggregate data in memory — group by placement only
       const placementGroups = new Map<string, {
         placement: string;
         biddingStrategy: string;
+        latestStrategyDate: string | null;
         bidAdjustmentPct: number | null;
-        latestDate: string | null;
+        latestBidAdjDate: string | null;
         totalImpressions: number;
         totalClicks: number;
         totalCostEur: number;
@@ -1066,14 +1067,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Process all results in memory
       allResults.forEach(row => {
-        const key = `${row.placement || 'UNKNOWN'}_${row.biddingStrategy || 'Not set'}`;
+        const key = row.placement || 'UNKNOWN';
 
         if (!placementGroups.has(key)) {
           placementGroups.set(key, {
             placement: row.placement || 'UNKNOWN',
-            biddingStrategy: row.biddingStrategy || 'Not set',
+            biddingStrategy: 'Not set',
+            latestStrategyDate: null,
             bidAdjustmentPct: null,
-            latestDate: null,
+            latestBidAdjDate: null,
             totalImpressions: 0,
             totalClicks: 0,
             totalCostEur: 0,
@@ -1085,10 +1087,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const group = placementGroups.get(key)!;
         const rates = exchangeRatesMap.get(row.date || '') || {};
 
-        // Track the bid adjustment from the most recent row
-        if (row.bidAdjustmentPct !== null && row.date && (!group.latestDate || row.date > group.latestDate)) {
+        // Track the most recent non-NULL bidding strategy
+        if (row.biddingStrategy && row.date && (!group.latestStrategyDate || row.date > group.latestStrategyDate)) {
+          group.biddingStrategy = row.biddingStrategy;
+          group.latestStrategyDate = row.date;
+        }
+
+        // Track the most recent non-NULL bid adjustment
+        if (row.bidAdjustmentPct !== null && row.date && (!group.latestBidAdjDate || row.date > group.latestBidAdjDate)) {
           group.bidAdjustmentPct = Number(row.bidAdjustmentPct);
-          group.latestDate = row.date;
+          group.latestBidAdjDate = row.date;
         }
 
         // Convert to EUR and aggregate
@@ -1109,6 +1117,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         group.totalSalesEur += salesEur;
         group.totalOrders += orders;
       });
+
+      // Format SCREAMING_SNAKE_CASE strategy names to Title Case
+      const formatStrategyName = (strategy: string): string => {
+        if (!strategy || strategy === 'Not set') return strategy;
+        return strategy
+          .split('_')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join(' ');
+      };
 
       // Calculate metrics and recommendations
       const placements = Array.from(placementGroups.values()).map(group => {
@@ -1162,7 +1179,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         return {
           placement: normalizedPlacement,
-          biddingStrategy: group.biddingStrategy,
+          biddingStrategy: formatStrategyName(group.biddingStrategy),
           bidAdjustment,
           impressions: group.totalImpressions,
           clicks: group.totalClicks,
@@ -1177,8 +1194,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       });
 
-      // Sort by placement priority: TOS > ROS > PP > UNKNOWN
-      const placementOrder = { 'Top of search (first page)': 1, 'Rest of search': 2, 'Product pages': 3, 'UNKNOWN': 4 };
+      // Sort by placement priority: TOS > ROS > PP > Off Amazon > Unknown
+      const placementOrder: Record<string, number> = { 'Top of search (first page)': 1, 'Rest of search': 2, 'Product pages': 3, 'Off Amazon': 4, 'Unknown': 5 };
       placements.sort((a, b) => {
         const orderA = placementOrder[a.placement as keyof typeof placementOrder] || 999;
         const orderB = placementOrder[b.placement as keyof typeof placementOrder] || 999;

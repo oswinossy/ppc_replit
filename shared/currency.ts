@@ -83,11 +83,15 @@ export function normalizePlacementName(placement: string | null): string {
   if (!placement) return 'Unknown';
   
   const normalizedMap: Record<string, string> = {
+    // SP placement names (from Amazon API format)
     'Top of Search on-Amazon': 'Top of search (first page)',
     'Detail Page on-Amazon': 'Product pages',
     'Other on-Amazon': 'Rest of search',
     'Off Amazon': 'Off Amazon',
     'UNKNOWN': 'Unknown',
+    // SB placement names (from s_brand_placement.placement_classification)
+    'Top of search': 'Top of search (first page)',
+    'Detail page': 'Product pages',
   };
   
   return normalizedMap[placement] || placement;
