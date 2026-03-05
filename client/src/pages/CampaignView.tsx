@@ -35,6 +35,7 @@ export default function CampaignView() {
   const searchParams = useSearchParams();
   const countryCode = searchParams.country;
   const campaignType = searchParams.campaignType;
+  const campaignNameParam = searchParams.campaignName ? decodeURIComponent(searchParams.campaignName) : null;
   // Get display name for campaign type
   const campaignTypeLabel = campaignType === 'brands' ? 'Sponsored Brands' : 
                             campaignType === 'display' ? 'Display' : 'Sponsored Products';
@@ -273,8 +274,13 @@ export default function CampaignView() {
             <TimeRangePicker value={dateRange} onChange={setDateRange} />
             <AgentChat />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-end gap-1">
             <FilterChip label="Campaign" value={campaignId} />
+            {(campaignNameParam || kpis?.campaignName) && (
+              <span className="text-sm text-muted-foreground truncate max-w-[400px]">
+                {campaignNameParam || kpis?.campaignName}
+              </span>
+            )}
           </div>
         </div>
       </div>

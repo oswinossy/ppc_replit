@@ -270,7 +270,7 @@ export default function CountryView() {
                   c.campaign.toLowerCase().includes(searchQuery.toLowerCase())
                 )}
                 onRowClick={(row) => {
-                  setLocation(`/campaign/${row.id}?country=${countryCode}&campaignType=${campaignType}`);
+                  setLocation(`/campaign/${row.id}?country=${countryCode}&campaignType=${campaignType}&campaignName=${encodeURIComponent(row.campaign)}`);
                 }}
               />
               {searchQuery && campaigns.filter((c: any) =>

@@ -50,7 +50,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { country, campaignId, adGroupId, campaignType = 'products', from, to, convertToEur: convertToEurParam = 'true' } = req.query;
       const shouldConvertToEur = convertToEurParam === 'true';
       
-      let results: Array<{ date: any; currency: any; clicks: number; cost: number; sales: number; orders: number }> = [];
+      let results: Array<{ date: any; currency: any; clicks: number; cost: number; sales: number; orders: number; campaignName?: string }> = [];
 
       if (campaignType === 'brands') {
         // Query brand data only (no adGroupId filter - brand tables don't use this)
@@ -68,6 +68,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cost: sql<number>`COALESCE(SUM(${brandSearchTerms.cost}), 0)`,
             sales: sql<number>`COALESCE(SUM(${brandSearchTerms.sales}), 0)`,
             orders: sql<number>`COALESCE(SUM(${brandSearchTerms.purchases}), 0)`,
+            campaignName: sql<string>`MAX(${brandSearchTerms.campaignName})`,
           })
           .from(brandSearchTerms)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -88,6 +89,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cost: sql<number>`COALESCE(SUM(${displayMatchedTarget.cost}), 0)`,
             sales: sql<number>`COALESCE(SUM(${displayMatchedTarget.sales}), 0)`,
             orders: sql<number>`COALESCE(SUM(${displayMatchedTarget.purchases}), 0)`,
+            campaignName: sql<string>`MAX(${displayMatchedTarget.campaignName})`,
           })
           .from(displayMatchedTarget)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -109,6 +111,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cost: sql<number>`COALESCE(SUM(${productSearchTerms.cost}), 0)`,
             sales: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.sales30d}, '')::numeric), 0)`,
             orders: sql<number>`COALESCE(SUM(NULLIF(${productSearchTerms.purchases30d}, '')::numeric), 0)`,
+            campaignName: sql<string>`MAX(${productSearchTerms.campaignName})`,
           })
           .from(productSearchTerms)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -172,6 +175,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const cpc = calculateCPC(totalCost, totalClicks);
       const roas = calculateROAS(totalSales, totalCost);
 
+      const campaignName = results.find(r => r.campaignName)?.campaignName || null;
+
       const response = {
         adSales: totalSales,
         acos,
@@ -181,6 +186,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         orders: totalOrders,
         clicks: totalClicks,
         currency: resultCurrency,
+        campaignName,
       };
       
       // Cache the response
