@@ -670,7 +670,7 @@ async function executeGetBrandPlacements(params: { from: string; to: string; cou
   
   const results = await db
     .select({
-      costType: brandPlacement.costType,
+      costType: brandPlacement.placementClassification,
       clicks: sql<number>`COALESCE(SUM(${brandPlacement.clicks}), 0)`,
       cost: sql<number>`COALESCE(SUM(${brandPlacement.cost}), 0)`,
       sales: sql<number>`COALESCE(SUM(${brandPlacement.sales}), 0)`,
@@ -679,7 +679,7 @@ async function executeGetBrandPlacements(params: { from: string; to: string; cou
     })
     .from(brandPlacement)
     .where(and(...conditions))
-    .groupBy(brandPlacement.costType);
+    .groupBy(brandPlacement.placementClassification);
   
   return results.map(row => ({
     costType: row.costType || "Unknown",
